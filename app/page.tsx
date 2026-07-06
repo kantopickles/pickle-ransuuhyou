@@ -43,7 +43,18 @@ type SharePayload = {
 
 type StoredSchedule = {
   activeCourts: number;
+  courtCount?: number;
+  matchCount?: number;
   matches: MatchPlan[];
+  names?: string[];
+  participantCount?: number;
+};
+
+type GeneratedMeta = {
+  courtCount: number;
+  matchCount: number;
+  names: string[];
+  participantCount: number;
 };
 
 type Unit = {
@@ -359,7 +370,8 @@ function generateSchedule(
   return { matches, stats, activeCourts };
 }
 
-function rebuildSchedule(storedSchedule: StoredSchedule, participantCount: number): GeneratedSchedule {
+function rebuildSchedule(storedSchedule: StoredSchedule, fallbackParticipantCount: number): GeneratedSchedule {
+  const participantCount = storedSchedule.participantCount ?? storedSchedule.names?.length ?? fallbackParticipantCount;
   const stats = createStats(participantCount);
 
   for (const match of storedSchedule.matches) {
@@ -418,6 +430,8 @@ export default function Home() {
   const [names, setNames] = useState<string[]>(() => createInitialNames(10));
   const [pairs, setPairs] = useState<PairSetting[]>([]);
   const [schedule, setSchedule] = useState<GeneratedSchedule | null>(null);
+  const [generatedMeta, setGeneratedMeta] = useState<GeneratedMeta | null>(null);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
   const [error, setError] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [checkedMatches, setCheckedMatches] = useState<Set<number>>(() => new Set());
@@ -444,6 +458,7 @@ export default function Home() {
         names?: string[];
         pairs?: PairSetting[];
         schedule?: StoredSchedule | null;
+        scheduleDirty?: boolean;
         shareEditToken?: string;
         shareId?: string;
         checkedMatches?: number[];
@@ -461,6 +476,13 @@ export default function Home() {
       setCheckedMatches(new Set(parsed.checkedMatches ?? []));
       if (parsed.schedule) {
         setSchedule(rebuildSchedule(parsed.schedule, savedCount));
+        setGeneratedMeta({
+          courtCount: parsed.schedule.courtCount ?? parsed.courtCount ?? 2,
+          matchCount: parsed.schedule.matchCount ?? parsed.matchCount ?? 20,
+          names: parsed.schedule.names ?? Array.from({ length: savedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`),
+          participantCount: parsed.schedule.participantCount ?? savedCount
+        });
+        setScheduleDirty(parsed.scheduleDirty ?? false);
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -477,17 +499,35 @@ export default function Home() {
         names,
         pairs,
         participantCount,
-        schedule: schedule ? { activeCourts: schedule.activeCourts, matches: schedule.matches } : null,
+        schedule: schedule
+          ? {
+              activeCourts: schedule.activeCourts,
+              courtCount: generatedMeta?.courtCount,
+              matchCount: generatedMeta?.matchCount,
+              matches: schedule.matches,
+              names: generatedMeta?.names,
+              participantCount: generatedMeta?.participantCount
+            }
+          : null,
+        scheduleDirty,
         shareEditToken: currentShareEditToken,
         shareId: currentShareId
       })
     );
-  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches, schedule, currentShareEditToken, currentShareId]);
+  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
     [names]
   );
+  const scheduleNames = generatedMeta?.names ?? displayNames;
+  const generatedCourtCount = generatedMeta?.courtCount ?? courtCount;
+
+  function markScheduleDirty() {
+    if (schedule) {
+      setScheduleDirty(true);
+    }
+  }
 
   const usedPairMembers = useMemo(() => {
     const used = new Set<number>();
@@ -499,6 +539,7 @@ export default function Home() {
   }, [pairs]);
 
   function updateParticipantCount(nextCount: number) {
+    markScheduleDirty();
     setParticipantCount(nextCount);
     setNames((current) => Array.from({ length: nextCount }, (_, index) => current[index] || `${index + 1}番`));
     setPairs((current) =>
@@ -511,17 +552,15 @@ export default function Home() {
           pair.a !== pair.b
       )
     );
-    setSchedule(null);
-    setCheckedMatches(new Set());
-    setCurrentShareId("");
-    setCurrentShareEditToken("");
   }
 
   function updateName(index: number, value: string) {
+    markScheduleDirty();
     setNames((current) => current.map((name, nameIndex) => (nameIndex === index ? value : name)));
   }
 
   function updatePair(id: string, side: "a" | "b", value: string) {
+    markScheduleDirty();
     setPairs((current) =>
       current.map((pair) =>
         pair.id === id
@@ -532,23 +571,17 @@ export default function Home() {
           : pair
       )
     );
-    setSchedule(null);
-    setCheckedMatches(new Set());
-    setCurrentShareId("");
-    setCurrentShareEditToken("");
   }
 
   function addPair() {
+    markScheduleDirty();
     setPairs((current) => [...current, { id: crypto.randomUUID(), a: "", b: "" }]);
     setPairsOpen(true);
   }
 
   function removePair(id: string) {
+    markScheduleDirty();
     setPairs((current) => current.filter((pair) => pair.id !== id));
-    setSchedule(null);
-    setCheckedMatches(new Set());
-    setCurrentShareId("");
-    setCurrentShareEditToken("");
   }
 
   function createSchedule() {
@@ -556,12 +589,19 @@ export default function Home() {
     setError("");
 
     try {
-      setSchedule(generateSchedule(participantCount, courtCount, matchCount, pairs));
+      const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs);
+      setSchedule(nextSchedule);
+      setGeneratedMeta({
+        courtCount,
+        matchCount,
+        names: displayNames,
+        participantCount
+      });
+      setScheduleDirty(false);
       setCheckedMatches(new Set());
       setCurrentShareId("");
       setCurrentShareEditToken("");
     } catch (caught) {
-      setSchedule(null);
       setError(caught instanceof Error ? caught.message : "組み合わせを作成できませんでした。");
     }
   }
@@ -602,7 +642,7 @@ export default function Home() {
 
   async function openShareModal() {
     if (!schedule) return;
-    const payload = createSharePayload(schedule, displayNames);
+    const payload = createSharePayload(schedule, scheduleNames);
     let nextShareId = currentShareId;
     let nextShareEditToken = currentShareEditToken;
     let nextShareUrl = currentShareId ? `${window.location.origin}/s/${currentShareId}` : "";
@@ -633,7 +673,7 @@ export default function Home() {
     }
 
     if (!nextShareUrl) {
-      const encoded = await encodeSharePayload(schedule, displayNames);
+      const encoded = await encodeSharePayload(schedule, scheduleNames);
       nextShareUrl = `${window.location.origin}/share#${encoded}`;
     }
 
@@ -729,8 +769,8 @@ export default function Home() {
               id="courtCount"
               value={courtCount}
               onChange={(event) => {
+                markScheduleDirty();
                 setCourtCount(Number(event.target.value));
-                setSchedule(null);
               }}
             >
               {COURT_OPTIONS.map((count) => (
@@ -748,8 +788,8 @@ export default function Home() {
               id="matchCount"
               value={matchCount}
               onChange={(event) => {
+                markScheduleDirty();
                 setMatchCount(Number(event.target.value));
-                setSchedule(null);
               }}
             >
               {MATCH_OPTIONS.map((count) => (
@@ -874,7 +914,17 @@ export default function Home() {
       <section className="section">
         <h2>生成結果</h2>
         {!schedule ? <p className="empty">設定を入力して「乱数表を作成」を押してください。</p> : null}
-        {schedule && schedule.activeCourts < courtCount ? (
+        {schedule && generatedMeta ? (
+          <p className="schedule-meta">
+            表示中：{generatedMeta.participantCount}人 / {generatedMeta.courtCount}コート / {generatedMeta.matchCount}試合
+          </p>
+        ) : null}
+        {schedule && scheduleDirty ? (
+          <div className="notice">
+            設定が変更されています。表示中の乱数表は前回作成時の条件です。新しい条件にする場合は「再生成」を押してください。
+          </div>
+        ) : null}
+        {schedule && schedule.activeCourts < generatedCourtCount ? (
           <div className="error">
             参加人数に合わせて、この表では{schedule.activeCourts}コート分を作成しています。
           </div>
@@ -893,12 +943,12 @@ export default function Home() {
               <div className="court" key={`${match.match}-${court.court}`}>
                 <div className="court-title">コート{court.court}</div>
                 <div className="versus">
-                  {formatTeam(court.teamA, displayNames)} vs {formatTeam(court.teamB, displayNames)}
+                  {formatTeam(court.teamA, scheduleNames)} vs {formatTeam(court.teamB, scheduleNames)}
                 </div>
               </div>
             ))}
             <div className="rest">
-              休み：{match.resting.length ? match.resting.map((player) => displayNames[player]).join("、") : "なし"}
+              休み：{match.resting.length ? match.resting.map((player) => scheduleNames[player]).join("、") : "なし"}
             </div>
           </article>
         ))}
@@ -921,11 +971,11 @@ export default function Home() {
               <tbody>
                 {schedule.stats.map((stat, index) => (
                   <tr key={index}>
-                    <td>{displayNames[index]}</td>
+                    <td>{scheduleNames[index]}</td>
                     <td>{stat.played}回</td>
                     <td>{stat.rested}回</td>
-                    <td>{mapNames(stat.partners, displayNames)}</td>
-                    <td>{mapNames(stat.opponents, displayNames)}</td>
+                    <td>{mapNames(stat.partners, scheduleNames)}</td>
+                    <td>{mapNames(stat.opponents, scheduleNames)}</td>
                   </tr>
                 ))}
               </tbody>
