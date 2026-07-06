@@ -3,7 +3,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ピックルボール乱数表",
-  description: "ピックルボール練習会用の公平なダブルス乱数表作成アプリ"
+  description: "ピックルボール練習会用の公平なダブルス乱数表作成アプリ",
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+    shortcut: "/icon.png"
+  }
 };
 
 export const viewport: Viewport = {
