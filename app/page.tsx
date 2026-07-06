@@ -739,8 +739,11 @@ export default function Home() {
   return (
     <main className="page">
       <header className="top">
-        <h1>ピックルボール乱数表</h1>
-        <p>出場回数の平等を最優先に、固定ペアも考慮してダブルス表を作成します。</p>
+        <img
+          className="hero-image"
+          src="/pickleball-random-table-hero.png"
+          alt="Pickleball Random Table ピックルボール乱数表"
+        />
       </header>
 
       <section className="section">
