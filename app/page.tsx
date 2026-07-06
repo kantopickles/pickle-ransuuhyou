@@ -41,6 +41,11 @@ type SharePayload = {
   m: [number, number, number, number][][];
 };
 
+type StoredSchedule = {
+  activeCourts: number;
+  matches: MatchPlan[];
+};
+
 type Unit = {
   id: string;
   members: number[];
@@ -354,6 +359,20 @@ function generateSchedule(
   return { matches, stats, activeCourts };
 }
 
+function rebuildSchedule(storedSchedule: StoredSchedule, participantCount: number): GeneratedSchedule {
+  const stats = createStats(participantCount);
+
+  for (const match of storedSchedule.matches) {
+    applyMatchStats(match.courts, stats, participantCount);
+  }
+
+  return {
+    activeCourts: storedSchedule.activeCourts,
+    matches: storedSchedule.matches,
+    stats
+  };
+}
+
 function formatTeam(team: Team, names: string[]) {
   return `${names[team[0]]}・${names[team[1]]}`;
 }
@@ -408,6 +427,8 @@ export default function Home() {
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [currentShareId, setCurrentShareId] = useState("");
+  const [currentShareEditToken, setCurrentShareEditToken] = useState("");
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
 
@@ -422,6 +443,9 @@ export default function Home() {
         matchCount?: number;
         names?: string[];
         pairs?: PairSetting[];
+        schedule?: StoredSchedule | null;
+        shareEditToken?: string;
+        shareId?: string;
         checkedMatches?: number[];
       };
       const savedCount = parsed.participantCount && PARTICIPANT_OPTIONS.includes(parsed.participantCount)
@@ -432,7 +456,12 @@ export default function Home() {
       setMatchCount(parsed.matchCount && MATCH_OPTIONS.includes(parsed.matchCount) ? parsed.matchCount : 20);
       setNames(Array.from({ length: savedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
       setPairs(parsed.pairs ?? []);
+      setCurrentShareId(parsed.shareId ?? "");
+      setCurrentShareEditToken(parsed.shareEditToken ?? "");
       setCheckedMatches(new Set(parsed.checkedMatches ?? []));
+      if (parsed.schedule) {
+        setSchedule(rebuildSchedule(parsed.schedule, savedCount));
+      }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
     }
@@ -441,9 +470,19 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ participantCount, courtCount, matchCount, names, pairs, checkedMatches: Array.from(checkedMatches) })
+      JSON.stringify({
+        checkedMatches: Array.from(checkedMatches),
+        courtCount,
+        matchCount,
+        names,
+        pairs,
+        participantCount,
+        schedule: schedule ? { activeCourts: schedule.activeCourts, matches: schedule.matches } : null,
+        shareEditToken: currentShareEditToken,
+        shareId: currentShareId
+      })
     );
-  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches]);
+  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches, schedule, currentShareEditToken, currentShareId]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -474,6 +513,8 @@ export default function Home() {
     );
     setSchedule(null);
     setCheckedMatches(new Set());
+    setCurrentShareId("");
+    setCurrentShareEditToken("");
   }
 
   function updateName(index: number, value: string) {
@@ -493,6 +534,8 @@ export default function Home() {
     );
     setSchedule(null);
     setCheckedMatches(new Set());
+    setCurrentShareId("");
+    setCurrentShareEditToken("");
   }
 
   function addPair() {
@@ -504,6 +547,8 @@ export default function Home() {
     setPairs((current) => current.filter((pair) => pair.id !== id));
     setSchedule(null);
     setCheckedMatches(new Set());
+    setCurrentShareId("");
+    setCurrentShareEditToken("");
   }
 
   function createSchedule() {
@@ -513,6 +558,8 @@ export default function Home() {
     try {
       setSchedule(generateSchedule(participantCount, courtCount, matchCount, pairs));
       setCheckedMatches(new Set());
+      setCurrentShareId("");
+      setCurrentShareEditToken("");
     } catch (caught) {
       setSchedule(null);
       setError(caught instanceof Error ? caught.message : "組み合わせを作成できませんでした。");
@@ -556,21 +603,28 @@ export default function Home() {
   async function openShareModal() {
     if (!schedule) return;
     const payload = createSharePayload(schedule, displayNames);
-    let nextShareUrl = "";
+    let nextShareId = currentShareId;
+    let nextShareEditToken = currentShareEditToken;
+    let nextShareUrl = currentShareId ? `${window.location.origin}/s/${currentShareId}` : "";
     let nextQrCode = "";
 
-    try {
+    if (!nextShareUrl) try {
       const response = await fetch("/api/share", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          checkedMatches: Array.from(checkedMatches),
+          payload
+        })
       });
 
       if (response.ok) {
-        const result = (await response.json()) as { id?: string };
+        const result = (await response.json()) as { editToken?: string; id?: string };
         if (result.id) {
+          nextShareId = result.id;
+          nextShareEditToken = result.editToken ?? "";
           nextShareUrl = `${window.location.origin}/s/${result.id}`;
         }
       }
@@ -594,6 +648,8 @@ export default function Home() {
     }
 
     setShareCopied(false);
+    setCurrentShareId(nextShareId);
+    setCurrentShareEditToken(nextShareEditToken);
     setShareUrl(nextShareUrl);
     setShareQrCode(nextQrCode);
     setShareModalOpen(true);
@@ -616,8 +672,28 @@ export default function Home() {
       } else {
         next.add(matchNumber);
       }
+      if (currentShareId && currentShareEditToken) {
+        void updateSharedChecks(Array.from(next).sort((left, right) => left - right));
+      }
       return next;
     });
+  }
+
+  async function updateSharedChecks(nextCheckedMatches: number[]) {
+    try {
+      await fetch(`/api/share/${encodeURIComponent(currentShareId)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          checkedMatches: nextCheckedMatches,
+          editToken: currentShareEditToken
+        })
+      });
+    } catch {
+      // ローカルのチェック状態は残します。通信が戻ったら次回の操作で再同期されます。
+    }
   }
 
   return (

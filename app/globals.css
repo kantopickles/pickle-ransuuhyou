@@ -351,8 +351,27 @@ button:disabled {
 }
 
 .match h3 {
+  align-items: center;
+  display: flex;
   font-size: 20px;
+  gap: 8px;
   margin: 0 0 10px;
+}
+
+.done-badge {
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 999px;
+  color: #166534;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.match-done .court {
+  opacity: 0.72;
 }
 
 .match-check {

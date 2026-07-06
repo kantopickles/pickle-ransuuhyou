@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
 type Team = [number, number];
 
@@ -149,6 +150,7 @@ function formatSharedSchedule(payload: SharePayload) {
 export default function ShortSharePage() {
   const params = useParams<{ id: string }>();
   const [payload, setPayload] = useState<SharePayload | null>(null);
+  const [checkedMatches, setCheckedMatches] = useState<Set<number>>(() => new Set());
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -159,8 +161,14 @@ export default function ShortSharePage() {
       try {
         const response = await fetch(`/api/share/${encodeURIComponent(params.id)}`);
         if (!response.ok) throw new Error("not found");
-        const result = (await response.json()) as { payload: SharePayload | CompactSharePayload };
-        if (active) setPayload(normalizePayload(result.payload));
+        const result = (await response.json()) as {
+          checkedMatches?: number[];
+          payload: SharePayload | CompactSharePayload;
+        };
+        if (active) {
+          setCheckedMatches(new Set(result.checkedMatches ?? []));
+          setPayload(normalizePayload(result.payload));
+        }
       } catch {
         if (active) setError("共有リンクを読み込めませんでした。リンクが間違っているか、削除された可能性があります。");
       }
@@ -170,6 +178,36 @@ export default function ShortSharePage() {
 
     return () => {
       active = false;
+    };
+  }, [params.id]);
+
+  useEffect(() => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) return;
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const channel = supabase
+      .channel(`pickleball-share-${params.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          filter: `id=eq.${params.id}`,
+          schema: "public",
+          table: "pickleball_shared_schedules"
+        },
+        (event) => {
+          const nextCheckedMatches = event.new.checked_matches;
+          if (Array.isArray(nextCheckedMatches)) {
+            setCheckedMatches(new Set(nextCheckedMatches as number[]));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
     };
   }, [params.id]);
 
@@ -212,8 +250,11 @@ export default function ShortSharePage() {
           <section className="section">
             <h2>生成結果</h2>
             {payload.matches.map((match) => (
-              <article className="match" key={match.match}>
-                <h3>第{match.match}試合</h3>
+              <article className={`match ${checkedMatches.has(match.match) ? "match-done" : ""}`} key={match.match}>
+                <h3>
+                  第{match.match}試合
+                  {checkedMatches.has(match.match) ? <span className="done-badge">終了</span> : null}
+                </h3>
                 {match.courts.map((court) => (
                   <div className="court" key={`${match.match}-${court.court}`}>
                     <div className="court-title">コート{court.court}</div>

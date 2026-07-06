@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 
 const TABLE_NAME = "pickleball_shared_schedules";
+const TOKEN_TABLE_NAME = "pickleball_share_edit_tokens";
 const ID_CHARS = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function createShareId(length = 8) {
   const bytes = crypto.getRandomValues(new Uint8Array(length));
   return Array.from(bytes, (byte) => ID_CHARS[byte % ID_CHARS.length]).join("");
+}
+
+function createEditToken(length = 32) {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (byte) => ID_CHARS[byte % ID_CHARS.length]).join("");
+}
+
+async function hashToken(token: string) {
+  const bytes = new TextEncoder().encode(token);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function getSupabaseConfig() {
@@ -21,11 +33,15 @@ function getSupabaseConfig() {
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json();
+    const body = await request.json() as { checkedMatches?: number[]; payload?: unknown };
+    const payload = body.payload ?? body;
+    const checkedMatches = body.payload ? body.checkedMatches ?? [] : [];
     const { key, url } = getSupabaseConfig();
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const id = createShareId();
+      const editToken = createEditToken();
+      const editTokenHash = await hashToken(editToken);
       const response = await fetch(`${url}/rest/v1/${TABLE_NAME}`, {
         method: "POST",
         headers: {
@@ -36,12 +52,32 @@ export async function POST(request: Request) {
         },
         body: JSON.stringify({
           id,
-          payload
+          payload,
+          checked_matches: checkedMatches
         })
       });
 
       if (response.ok) {
-        return NextResponse.json({ id });
+        const tokenResponse = await fetch(`${url}/rest/v1/${TOKEN_TABLE_NAME}`, {
+          method: "POST",
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal"
+          },
+          body: JSON.stringify({
+            share_id: id,
+            token_hash: editTokenHash
+          })
+        });
+
+        if (!tokenResponse.ok) {
+          const message = await tokenResponse.text();
+          return NextResponse.json({ error: message || "Failed to save edit token." }, { status: 500 });
+        }
+
+        return NextResponse.json({ editToken, id });
       }
 
       if (response.status !== 409) {
