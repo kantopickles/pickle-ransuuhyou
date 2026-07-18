@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 
 type PairSetting = {
@@ -435,6 +435,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [checkedMatches, setCheckedMatches] = useState<Set<number>>(() => new Set());
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const [namesOpen, setNamesOpen] = useState(false);
   const [pairsOpen, setPairsOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -445,10 +446,15 @@ export default function Home() {
   const [currentShareEditToken, setCurrentShareEditToken] = useState("");
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
+  const [heroLoaded, setHeroLoaded] = useState(false);
+  const [storageLoaded, setStorageLoaded] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (!saved) return;
+    if (!saved) {
+      setStorageLoaded(true);
+      return;
+    }
 
     try {
       const parsed = JSON.parse(saved) as {
@@ -476,6 +482,7 @@ export default function Home() {
       setCheckedMatches(new Set(parsed.checkedMatches ?? []));
       if (parsed.schedule) {
         setSchedule(rebuildSchedule(parsed.schedule, savedCount));
+        setSettingsOpen(false);
         setGeneratedMeta({
           courtCount: parsed.schedule.courtCount ?? parsed.courtCount ?? 2,
           matchCount: parsed.schedule.matchCount ?? parsed.matchCount ?? 20,
@@ -486,10 +493,14 @@ export default function Home() {
       }
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      setStorageLoaded(true);
     }
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!storageLoaded) return;
+
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -514,7 +525,7 @@ export default function Home() {
         shareId: currentShareId
       })
     );
-  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId]);
+  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, storageLoaded]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -522,6 +533,10 @@ export default function Home() {
   );
   const scheduleNames = generatedMeta?.names ?? displayNames;
   const generatedCourtCount = generatedMeta?.courtCount ?? courtCount;
+  const completedMatchCount = schedule
+    ? schedule.matches.filter((match) => checkedMatches.has(match.match)).length
+    : 0;
+  const nextMatchNumber = schedule?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
 
   function markScheduleDirty() {
     if (schedule) {
@@ -599,6 +614,9 @@ export default function Home() {
       });
       setScheduleDirty(false);
       setCheckedMatches(new Set());
+      setSettingsOpen(false);
+      setNamesOpen(false);
+      setPairsOpen(false);
       setCurrentShareId("");
       setCurrentShareEditToken("");
     } catch (caught) {
@@ -719,6 +737,14 @@ export default function Home() {
     });
   }
 
+  function scrollToNextMatch() {
+    if (nextMatchNumber === null) return;
+    document.getElementById(`match-${nextMatchNumber}`)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }
+
   async function updateSharedChecks(nextCheckedMatches: number[]) {
     try {
       await fetch(`/api/share/${encodeURIComponent(currentShareId)}`, {
@@ -739,16 +765,41 @@ export default function Home() {
   return (
     <main className="page">
       <header className="top">
-        <img
-          className="hero-image"
-          src="/pickleball-random-table-hero.png"
-          alt="Pickleball Random Table ピックルボール乱数表"
-        />
+        <h1 className="sr-only">ピックルボール乱数表</h1>
+        <div className={`hero ${heroLoaded ? "hero-has-image" : ""}`}>
+          <div className="hero-fallback" aria-hidden={heroLoaded}>
+            <span>PICKLEBALL RANDOM TABLE</span>
+            <strong>ピックルボール乱数表</strong>
+          </div>
+          <img
+            className="hero-image"
+            src="/pickleball-random-table-hero.png"
+            alt="Pickleball Random Table ピックルボール乱数表"
+            onLoad={() => setHeroLoaded(true)}
+            onError={() => setHeroLoaded(false)}
+          />
+        </div>
       </header>
 
-      <section className="section">
-        <h2>基本設定</h2>
-        <div className="grid">
+      <section className="section collapsible">
+        <button
+          className="section-toggle"
+          type="button"
+          aria-expanded={settingsOpen}
+          onClick={() => setSettingsOpen((open) => !open)}
+        >
+          <span>
+            <span className="section-title">基本設定</span>
+            <span className="section-note">
+              {participantCount}人 / {courtCount}コート / {matchCount}試合
+              {scheduleDirty ? <span className="unsaved-badge">乱数表へ未反映</span> : null}
+            </span>
+          </span>
+          <span className="chevron" aria-hidden="true">
+            {settingsOpen ? "▲" : "▼"}
+          </span>
+        </button>
+        {settingsOpen ? <div className="grid settings-grid">
           <div className="field">
             <label htmlFor="participantCount">参加人数</label>
             <select
@@ -802,7 +853,7 @@ export default function Home() {
               ))}
             </select>
           </div>
-        </div>
+        </div> : null}
       </section>
 
       <section className="section collapsible">
@@ -912,7 +963,7 @@ export default function Home() {
         ) : null}
       </section>
 
-      {error ? <div className="error">{error}</div> : null}
+      {error ? <div className="error" role="alert">{error}</div> : null}
 
       <section className="section">
         <h2>生成結果</h2>
@@ -921,6 +972,24 @@ export default function Home() {
           <p className="schedule-meta">
             表示中：{generatedMeta.participantCount}人 / {generatedMeta.courtCount}コート / {generatedMeta.matchCount}試合
           </p>
+        ) : null}
+        {schedule ? (
+          <div className="progress-panel" aria-live="polite">
+            <div className="progress-copy">
+              <span className="progress-label">進行状況</span>
+              <strong>{completedMatchCount} / {schedule.matches.length}試合 終了</strong>
+              <span>{nextMatchNumber === null ? "すべての試合が終了しました" : `次は第${nextMatchNumber}試合です`}</span>
+            </div>
+            <div
+              className="progress-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={schedule.matches.length}
+              aria-valuenow={completedMatchCount}
+            >
+              <span style={{ width: `${(completedMatchCount / schedule.matches.length) * 100}%` }} />
+            </div>
+          </div>
         ) : null}
         {schedule && scheduleDirty ? (
           <div className="notice">
@@ -933,7 +1002,11 @@ export default function Home() {
           </div>
         ) : null}
         {schedule?.matches.map((match) => (
-          <article className="match" key={match.match}>
+          <article
+            className={`match ${checkedMatches.has(match.match) ? "match-done" : ""} ${nextMatchNumber === match.match ? "match-current" : ""}`}
+            id={`match-${match.match}`}
+            key={match.match}
+          >
             <label className="match-check">
               <input
                 type="checkbox"
@@ -946,7 +1019,9 @@ export default function Home() {
               <div className="court" key={`${match.match}-${court.court}`}>
                 <div className="court-title">コート{court.court}</div>
                 <div className="versus">
-                  {formatTeam(court.teamA, scheduleNames)} vs {formatTeam(court.teamB, scheduleNames)}
+                  <span className="team-name">{formatTeam(court.teamA, scheduleNames)}</span>
+                  <span className="vs-mark">VS</span>
+                  <span className="team-name">{formatTeam(court.teamB, scheduleNames)}</span>
                 </div>
               </div>
             ))}
@@ -974,11 +1049,11 @@ export default function Home() {
               <tbody>
                 {schedule.stats.map((stat, index) => (
                   <tr key={index}>
-                    <td>{scheduleNames[index]}</td>
-                    <td>{stat.played}回</td>
-                    <td>{stat.rested}回</td>
-                    <td>{mapNames(stat.partners, scheduleNames)}</td>
-                    <td>{mapNames(stat.opponents, scheduleNames)}</td>
+                    <td data-label="名前">{scheduleNames[index]}</td>
+                    <td data-label="出場">{stat.played}回</td>
+                    <td data-label="休み">{stat.rested}回</td>
+                    <td data-label="ペア">{mapNames(stat.partners, scheduleNames)}</td>
+                    <td data-label="対戦相手">{mapNames(stat.opponents, scheduleNames)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -988,20 +1063,31 @@ export default function Home() {
       ) : null}
 
       <div className="actions">
-        <button className="primary" type="button" onClick={requestGenerate}>
-          乱数表を作成
-        </button>
-        <button className="secondary" type="button" onClick={requestGenerate}>
-          再生成
-        </button>
-        <button className="share" type="button" onClick={openShareModal} disabled={!schedule}>
-          共有リンク
-        </button>
+        {!schedule ? (
+          <button className="primary action-create" type="button" onClick={requestGenerate}>
+            乱数表を作成
+          </button>
+        ) : (
+          <>
+            <button className="primary action-next" type="button" onClick={scrollToNextMatch} disabled={nextMatchNumber === null}>
+              {nextMatchNumber === null ? "全試合終了" : `次の試合へ（第${nextMatchNumber}試合）`}
+            </button>
+            <button className="share" type="button" onClick={openShareModal}>
+              共有リンク
+            </button>
+            <button className="secondary" type="button" onClick={requestGenerate}>
+              {scheduleDirty ? "変更内容で再生成" : "再生成"}
+            </button>
+          </>
+        )}
       </div>
 
       {passwordOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="password-title">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="password-title" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setPasswordOpen(false);
+        }}>
           <div className="modal">
+            <button className="modal-close" type="button" aria-label="閉じる" onClick={() => setPasswordOpen(false)}>×</button>
             <h2 id="password-title">パスワード</h2>
             <p>乱数表を作成するにはパスワードを入力してください。</p>
             <input
@@ -1018,7 +1104,7 @@ export default function Home() {
                 if (event.key === "Escape") setPasswordOpen(false);
               }}
             />
-            {passwordError ? <div className="error password-message">{passwordError}</div> : null}
+            {passwordError ? <div className="error password-message" role="alert">{passwordError}</div> : null}
             <div className="modal-actions">
               <button className="secondary" type="button" onClick={() => setPasswordOpen(false)}>
                 キャンセル
@@ -1032,8 +1118,11 @@ export default function Home() {
       ) : null}
 
       {shareModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="share-title">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="share-title" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShareModalOpen(false);
+        }}>
           <div className="modal share-modal">
+            <button className="modal-close" type="button" aria-label="閉じる" onClick={() => setShareModalOpen(false)}>×</button>
             <h2 id="share-title">共有リンク</h2>
             <p>このQRコードかリンクを共有すると、結果だけ見られます。</p>
             {shareQrCode ? (
@@ -1046,7 +1135,7 @@ export default function Home() {
               </div>
             )}
             <div className="share-url-box">{shareUrl}</div>
-            {shareCopied ? <div className="success password-message">共有リンクをコピーしました</div> : null}
+            {shareCopied ? <div className="success password-message" role="status">共有リンクをコピーしました</div> : null}
             <div className="modal-actions">
               <button className="secondary" type="button" onClick={() => setShareModalOpen(false)}>
                 閉じる

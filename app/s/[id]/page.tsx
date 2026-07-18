@@ -235,6 +235,10 @@ export default function ShortSharePage() {
   }
 
   const stats = payload ? createStats(payload) : [];
+  const completedMatchCount = payload
+    ? payload.matches.filter((match) => checkedMatches.has(match.match)).length
+    : 0;
+  const nextMatchNumber = payload?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
 
   return (
     <main className="page share-page">
@@ -243,14 +247,25 @@ export default function ShortSharePage() {
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
 
-      {error ? <div className="error">{error}</div> : null}
+      {!payload && !error ? <div className="section loading" role="status">乱数表を読み込んでいます...</div> : null}
+      {error ? <div className="error" role="alert">{error}</div> : null}
 
       {payload ? (
         <>
           <section className="section">
             <h2>生成結果</h2>
+            <div className="progress-panel" aria-live="polite">
+              <div className="progress-copy">
+                <span className="progress-label">進行状況</span>
+                <strong>{completedMatchCount} / {payload.matches.length}試合 終了</strong>
+                <span>{nextMatchNumber === null ? "すべての試合が終了しました" : `次は第${nextMatchNumber}試合です`}</span>
+              </div>
+              <div className="progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={payload.matches.length} aria-valuenow={completedMatchCount}>
+                <span style={{ width: `${(completedMatchCount / payload.matches.length) * 100}%` }} />
+              </div>
+            </div>
             {payload.matches.map((match) => (
-              <article className={`match ${checkedMatches.has(match.match) ? "match-done" : ""}`} key={match.match}>
+              <article className={`match ${checkedMatches.has(match.match) ? "match-done" : ""} ${nextMatchNumber === match.match ? "match-current" : ""}`} key={match.match}>
                 <h3>
                   第{match.match}試合
                   {checkedMatches.has(match.match) ? <span className="done-badge">終了</span> : null}
@@ -259,7 +274,9 @@ export default function ShortSharePage() {
                   <div className="court" key={`${match.match}-${court.court}`}>
                     <div className="court-title">コート{court.court}</div>
                     <div className="versus">
-                      {formatTeam(court.teamA, payload.names)} vs {formatTeam(court.teamB, payload.names)}
+                      <span className="team-name">{formatTeam(court.teamA, payload.names)}</span>
+                      <span className="vs-mark">VS</span>
+                      <span className="team-name">{formatTeam(court.teamB, payload.names)}</span>
                     </div>
                   </div>
                 ))}
@@ -286,17 +303,17 @@ export default function ShortSharePage() {
                 <tbody>
                   {stats.map((stat, index) => (
                     <tr key={index}>
-                      <td>{payload.names[index]}</td>
-                      <td>{stat.played}回</td>
-                      <td>{stat.rested}回</td>
-                      <td>{mapNames(stat.partners, payload.names)}</td>
-                      <td>{mapNames(stat.opponents, payload.names)}</td>
+                      <td data-label="名前">{payload.names[index]}</td>
+                      <td data-label="出場">{stat.played}回</td>
+                      <td data-label="休み">{stat.rested}回</td>
+                      <td data-label="ペア">{mapNames(stat.partners, payload.names)}</td>
+                      <td data-label="対戦相手">{mapNames(stat.opponents, payload.names)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {copied ? <div className="success">コピーしました</div> : null}
+            {copied ? <div className="success" role="status">コピーしました</div> : null}
           </section>
 
           <div className="actions read-only-actions">
