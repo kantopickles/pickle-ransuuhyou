@@ -446,7 +446,6 @@ export default function Home() {
   const [currentShareEditToken, setCurrentShareEditToken] = useState("");
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
-  const [heroLoaded, setHeroLoaded] = useState(false);
   const [storageLoaded, setStorageLoaded] = useState(false);
 
   useEffect(() => {
@@ -766,19 +765,11 @@ export default function Home() {
     <main className="page">
       <header className="top">
         <h1 className="sr-only">ピックルボール乱数表</h1>
-        <div className={`hero ${heroLoaded ? "hero-has-image" : ""}`}>
-          <div className="hero-fallback" aria-hidden={heroLoaded}>
-            <span>PICKLEBALL RANDOM TABLE</span>
-            <strong>ピックルボール乱数表</strong>
-          </div>
-          <img
-            className="hero-image"
-            src="/pickleball-random-table-hero.png"
-            alt="Pickleball Random Table ピックルボール乱数表"
-            onLoad={() => setHeroLoaded(true)}
-            onError={() => setHeroLoaded(false)}
-          />
-        </div>
+        <img
+          className="hero-image"
+          src="/pickleball-random-table-hero.png"
+          alt="Pickleball Random Table ピックルボール乱数表"
+        />
       </header>
 
       <section className="section collapsible">

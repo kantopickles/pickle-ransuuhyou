@@ -60,53 +60,12 @@ button {
   padding: 0 0 14px;
 }
 
-.hero {
-  background: #fff;
-  border: 1px solid var(--line);
+.hero-image {
   border-radius: 8px;
   box-shadow: var(--shadow);
-  min-height: 96px;
-  overflow: hidden;
-  position: relative;
-}
-
-.hero-fallback {
-  align-items: center;
-  display: flex;
-  flex-direction: column;
-  inset: 0;
-  justify-content: center;
-  padding: 18px;
-  position: absolute;
-  text-align: center;
-}
-
-.hero-fallback span {
-  color: var(--brand-dark);
-  font-size: 13px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-}
-
-.hero-fallback strong {
-  color: #123b34;
-  font-size: 24px;
-  margin-top: 4px;
-}
-
-.hero-image {
   display: block;
   height: auto;
-  opacity: 0;
   width: 100%;
-}
-
-.hero-has-image .hero-image {
-  opacity: 1;
-}
-
-.hero-has-image .hero-fallback {
-  display: none;
 }
 
 .section {
