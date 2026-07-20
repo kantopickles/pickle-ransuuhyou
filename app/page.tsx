@@ -446,6 +446,7 @@ export default function Home() {
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordChecking, setPasswordChecking] = useState(false);
+  const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [currentShareId, setCurrentShareId] = useState("");
   const [currentShareEditToken, setCurrentShareEditToken] = useState("");
@@ -684,6 +685,11 @@ export default function Home() {
     setPasswordInput("");
     setPasswordError("");
     setPasswordOpen(true);
+  }
+
+  async function confirmRegenerate() {
+    setRegenerateConfirmOpen(false);
+    await requestGenerate();
   }
 
   async function confirmGenerate() {
@@ -1129,12 +1135,32 @@ export default function Home() {
             <button className="share" type="button" onClick={openShareModal}>
               共有リンク
             </button>
-            <button className="secondary" type="button" onClick={() => void requestGenerate()} disabled={passwordChecking}>
+            <button className="secondary" type="button" onClick={() => setRegenerateConfirmOpen(true)} disabled={passwordChecking}>
               {passwordChecking ? "確認中..." : scheduleDirty ? "変更内容で再生成" : "再生成"}
             </button>
           </>
         )}
       </div>
+
+      {regenerateConfirmOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="regenerate-title" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setRegenerateConfirmOpen(false);
+        }}>
+          <div className="modal">
+            <button className="modal-close" type="button" aria-label="閉じる" onClick={() => setRegenerateConfirmOpen(false)}>×</button>
+            <h2 id="regenerate-title">再生成しますか？</h2>
+            <p>現在の乱数表は、新しい組み合わせに置き換わります。</p>
+            <div className="modal-actions">
+              <button className="secondary" type="button" onClick={() => setRegenerateConfirmOpen(false)}>
+                キャンセル
+              </button>
+              <button className="primary" type="button" onClick={() => void confirmRegenerate()}>
+                再生成する
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {passwordOpen ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="password-title" onMouseDown={(event) => {
