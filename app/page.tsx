@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 
 type PairSetting = {
@@ -41,6 +41,11 @@ type SharePayload = {
   m: [number, number, number, number][][];
 };
 
+type ShareRecord = {
+  editToken: string;
+  id: string;
+};
+
 type StoredSchedule = {
   activeCourts: number;
   courtCount?: number;
@@ -67,7 +72,6 @@ const PARTICIPANT_OPTIONS = Array.from({ length: 17 }, (_, index) => index + 4);
 const COURT_OPTIONS = [1, 2, 3, 4, 5];
 const MATCH_OPTIONS = [5, 10, 15, 20];
 const STORAGE_KEY = "pickleball-randomizer-state-v1";
-const GENERATE_PASSWORD = "kanto2025pickles";
 
 function createInitialNames(count: number) {
   return Array.from({ length: count }, (_, index) => `${index + 1}番`);
@@ -441,12 +445,14 @@ export default function Home() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [passwordChecking, setPasswordChecking] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [currentShareId, setCurrentShareId] = useState("");
   const [currentShareEditToken, setCurrentShareEditToken] = useState("");
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(false);
+  const pendingShareSave = useRef<Promise<ShareRecord | null> | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -598,6 +604,43 @@ export default function Home() {
     setPairs((current) => current.filter((pair) => pair.id !== id));
   }
 
+  async function requestShareRecord(
+    nextSchedule: GeneratedSchedule,
+    nextNames: string[],
+    nextCheckedMatches: number[]
+  ): Promise<ShareRecord | null> {
+    try {
+      const response = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checkedMatches: nextCheckedMatches,
+          payload: createSharePayload(nextSchedule, nextNames)
+        })
+      });
+
+      if (!response.ok) return null;
+      const result = (await response.json()) as { editToken?: string; id?: string };
+      if (!result.id || !result.editToken) return null;
+      return { editToken: result.editToken, id: result.id };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveScheduleToHistory(nextSchedule: GeneratedSchedule, nextNames: string[]) {
+    const savePromise = requestShareRecord(nextSchedule, nextNames, []);
+    pendingShareSave.current = savePromise;
+
+    void savePromise.then((record) => {
+      if (pendingShareSave.current !== savePromise) return;
+      pendingShareSave.current = null;
+      if (!record) return;
+      setCurrentShareId(record.id);
+      setCurrentShareEditToken(record.editToken);
+    });
+  }
+
   function createSchedule() {
     setShareCopied(false);
     setError("");
@@ -618,6 +661,7 @@ export default function Home() {
       setPairsOpen(false);
       setCurrentShareId("");
       setCurrentShareEditToken("");
+      saveScheduleToHistory(nextSchedule, displayNames);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "組み合わせを作成できませんでした。");
     }
@@ -629,15 +673,29 @@ export default function Home() {
     setPasswordOpen(true);
   }
 
-  function confirmGenerate() {
-    if (passwordInput !== GENERATE_PASSWORD) {
-      setPasswordError("パスワードが違います。");
-      return;
-    }
+  async function confirmGenerate() {
+    setPasswordChecking(true);
+    setPasswordError("");
 
-    setPasswordOpen(false);
-    setPasswordInput("");
-    createSchedule();
+    try {
+      const response = await fetch("/api/admin/verify", {
+        method: "POST",
+        headers: { "x-admin-password": passwordInput }
+      });
+
+      if (!response.ok) {
+        setPasswordError("パスワードが違います。");
+        return;
+      }
+
+      setPasswordOpen(false);
+      setPasswordInput("");
+      createSchedule();
+    } catch {
+      setPasswordError("パスワードを確認できませんでした。通信状態を確認してください。");
+    } finally {
+      setPasswordChecking(false);
+    }
   }
 
   async function copyText(text: string) {
@@ -659,34 +717,22 @@ export default function Home() {
 
   async function openShareModal() {
     if (!schedule) return;
-    const payload = createSharePayload(schedule, scheduleNames);
     let nextShareId = currentShareId;
     let nextShareEditToken = currentShareEditToken;
     let nextShareUrl = currentShareId ? `${window.location.origin}/s/${currentShareId}` : "";
     let nextQrCode = "";
 
-    if (!nextShareUrl) try {
-      const response = await fetch("/api/share", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          checkedMatches: Array.from(checkedMatches),
-          payload
-        })
-      });
+    if (!nextShareUrl) {
+      const record = pendingShareSave.current
+        ? await pendingShareSave.current
+        : await requestShareRecord(schedule, scheduleNames, Array.from(checkedMatches));
 
-      if (response.ok) {
-        const result = (await response.json()) as { editToken?: string; id?: string };
-        if (result.id) {
-          nextShareId = result.id;
-          nextShareEditToken = result.editToken ?? "";
-          nextShareUrl = `${window.location.origin}/s/${result.id}`;
-        }
+      pendingShareSave.current = null;
+      if (record) {
+        nextShareId = record.id;
+        nextShareEditToken = record.editToken;
+        nextShareUrl = `${window.location.origin}/s/${record.id}`;
       }
-    } catch {
-      nextShareUrl = "";
     }
 
     if (!nextShareUrl) {
@@ -771,6 +817,10 @@ export default function Home() {
           alt="Pickleball Random Table ピックルボール乱数表"
         />
       </header>
+
+      <nav className="utility-nav" aria-label="管理">
+        <a className="admin-link" href="/admin">過去の乱数表</a>
+      </nav>
 
       <section className="section collapsible">
         <button
@@ -1100,8 +1150,8 @@ export default function Home() {
               <button className="secondary" type="button" onClick={() => setPasswordOpen(false)}>
                 キャンセル
               </button>
-              <button className="primary" type="button" onClick={confirmGenerate}>
-                作成する
+              <button className="primary" type="button" onClick={() => void confirmGenerate()} disabled={passwordChecking}>
+                {passwordChecking ? "確認中..." : "作成する"}
               </button>
             </div>
           </div>

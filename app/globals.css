@@ -68,6 +68,21 @@ button {
   width: 100%;
 }
 
+.utility-nav {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 12px;
+}
+
+.admin-link,
+.back-link {
+  color: var(--brand-dark);
+  font-size: 15px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .section {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -616,6 +631,144 @@ button:disabled {
   text-align: center;
 }
 
+.admin-page {
+  padding-bottom: 36px;
+}
+
+.admin-header {
+  padding: 8px 2px 18px;
+}
+
+.admin-header h1 {
+  font-size: 30px;
+  line-height: 1.25;
+  margin: 14px 0 4px;
+}
+
+.admin-header p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.admin-login {
+  margin-top: 8px;
+}
+
+.admin-login form {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-title-row {
+  align-items: end;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.text-button,
+.back-button {
+  background: transparent;
+  color: var(--brand-dark);
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 44px;
+  padding: 8px 2px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.admin-list {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-card {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  color: var(--text);
+  cursor: pointer;
+  display: grid;
+  gap: 3px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 92px;
+  padding: 14px 50px 14px 14px;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.schedule-card:focus-visible,
+.schedule-card:hover {
+  border-color: var(--brand);
+  outline: none;
+}
+
+.schedule-card-date {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  grid-column: 1 / -1;
+}
+
+.schedule-card strong {
+  font-size: 18px;
+}
+
+.schedule-card-progress {
+  color: var(--brand-dark);
+  font-size: 14px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.schedule-card-arrow {
+  align-items: center;
+  color: var(--brand);
+  display: flex;
+  font-size: 34px;
+  height: 44px;
+  justify-content: center;
+  position: absolute;
+  right: 8px;
+  top: calc(50% - 22px);
+  width: 36px;
+}
+
+.admin-detail-header h1 {
+  font-size: 24px;
+  margin-top: 6px;
+}
+
+.admin-detail-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  margin-bottom: 12px;
+}
+
+.admin-action-link {
+  text-decoration: none;
+}
+
+.danger-button {
+  align-items: center;
+  background: #fff1f0;
+  border: 1px solid #fda29b;
+  border-radius: 8px;
+  color: var(--danger);
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 48px;
+  padding: 10px 14px;
+}
+
 @media (max-width: 560px) {
   .page {
     padding-bottom: 150px;
@@ -665,6 +818,18 @@ button:disabled {
     max-height: calc(100dvh - 28px);
     overflow-y: auto;
     padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .admin-page {
+    padding-bottom: 28px;
+  }
+
+  .admin-header h1 {
+    font-size: 26px;
+  }
+
+  .schedule-card {
+    min-height: 98px;
   }
 
   .summary {
