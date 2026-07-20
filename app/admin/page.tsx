@@ -39,8 +39,6 @@ type ManagedSchedule = Omit<ApiSchedule, "payload"> & {
   payload: SharePayload;
 };
 
-const PASSWORD_STORAGE_KEY = "pickleball-admin-password";
-
 function normalizePayload(payload: SharePayload | CompactSharePayload): SharePayload {
   if ("n" in payload && "m" in payload) {
     return {
@@ -79,8 +77,21 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function withUpdatedResting(payload: SharePayload): SharePayload {
+  return {
+    ...payload,
+    matches: payload.matches.map((match) => {
+      const playing = new Set(match.courts.flatMap((court) => [...court.teamA, ...court.teamB]));
+      return {
+        ...match,
+        resting: payload.names.map((_, index) => index).filter((player) => !playing.has(player))
+      };
+    })
+  };
+}
+
 export default function AdminPage() {
-  const [password, setPassword] = useState("");
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [passwordInput, setPasswordInput] = useState("");
   const [schedules, setSchedules] = useState<ManagedSchedule[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -95,29 +106,24 @@ export default function AdminPage() {
   );
 
   useEffect(() => {
-    const savedPassword = window.sessionStorage.getItem(PASSWORD_STORAGE_KEY);
-    if (!savedPassword) return;
-    setPassword(savedPassword);
-    setPasswordInput(savedPassword);
-    void loadSchedules(savedPassword);
+    void loadSchedules();
   }, []);
 
-  async function loadSchedules(nextPassword = password) {
+  async function loadSchedules() {
     setLoading(true);
     setError("");
     setStatus("");
 
     try {
       const response = await fetch("/api/admin/schedules", {
-        cache: "no-store",
-        headers: { "x-admin-password": nextPassword }
+        cache: "no-store"
       });
       const result = (await response.json()) as { error?: string; schedules?: ApiSchedule[] };
 
       if (!response.ok) {
         if (response.status === 401) {
-          window.sessionStorage.removeItem(PASSWORD_STORAGE_KEY);
-          setPassword("");
+          setAuthenticated(false);
+          return;
         }
         throw new Error(result.error || "履歴を読み込めませんでした。");
       }
@@ -126,9 +132,8 @@ export default function AdminPage() {
         ...schedule,
         payload: normalizePayload(schedule.payload)
       }));
-      setPassword(nextPassword);
+      setAuthenticated(true);
       setSchedules(normalized);
-      window.sessionStorage.setItem(PASSWORD_STORAGE_KEY, nextPassword);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "履歴を読み込めませんでした。");
     } finally {
@@ -138,7 +143,23 @@ export default function AdminPage() {
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await loadSchedules(passwordInput);
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/admin/verify", {
+        method: "POST",
+        headers: { "x-admin-password": passwordInput }
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "パスワードが違います。");
+      setPasswordInput("");
+      await loadSchedules();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "管理画面を開けませんでした。");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function toggleMatch(matchNumber: number) {
@@ -160,8 +181,7 @@ export default function AdminPage() {
       const response = await fetch(`/api/admin/schedules/${encodeURIComponent(selected.id)}`, {
         method: "PATCH",
         headers: {
-          "Content-Type": "application/json",
-          "x-admin-password": password
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ checkedMatches: next })
       });
@@ -173,6 +193,58 @@ export default function AdminPage() {
         schedule.id === selected.id ? { ...schedule, checkedMatches: previous } : schedule
       )));
       setError(caught instanceof Error ? caught.message : "更新できませんでした。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function replacePlayer(
+    matchNumber: number,
+    courtIndex: number,
+    team: "teamA" | "teamB",
+    playerIndex: 0 | 1,
+    nextPlayer: number
+  ) {
+    if (!selected || saving) return;
+
+    const previousPayload = selected.payload;
+    const nextPayload = withUpdatedResting({
+      ...previousPayload,
+      matches: previousPayload.matches.map((match) => {
+        if (match.match !== matchNumber) return match;
+        return {
+          ...match,
+          courts: match.courts.map((court, index) => {
+            if (index !== courtIndex) return court;
+            const nextTeam: Team = [...court[team]] as Team;
+            nextTeam[playerIndex] = nextPlayer;
+            return { ...court, [team]: nextTeam };
+          })
+        };
+      })
+    });
+
+    setSchedules((current) => current.map((schedule) => (
+      schedule.id === selected.id ? { ...schedule, payload: nextPayload } : schedule
+    )));
+    setSaving(true);
+    setError("");
+    setStatus("");
+
+    try {
+      const response = await fetch(`/api/admin/schedules/${encodeURIComponent(selected.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: nextPayload })
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "参加者を変更できませんでした。");
+      setStatus("参加者の変更を共有先へ反映しました。");
+    } catch (caught) {
+      setSchedules((current) => current.map((schedule) => (
+        schedule.id === selected.id ? { ...schedule, payload: previousPayload } : schedule
+      )));
+      setError(caught instanceof Error ? caught.message : "参加者を変更できませんでした。");
     } finally {
       setSaving(false);
     }
@@ -190,7 +262,7 @@ export default function AdminPage() {
     try {
       const response = await fetch(`/api/admin/schedules/${encodeURIComponent(selected.id)}`, {
         method: "DELETE",
-        headers: { "x-admin-password": password }
+        headers: {}
       });
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error || "削除できませんでした。");
@@ -206,8 +278,8 @@ export default function AdminPage() {
   }
 
   function logout() {
-    window.sessionStorage.removeItem(PASSWORD_STORAGE_KEY);
-    setPassword("");
+    void fetch("/api/admin/logout", { method: "POST" });
+    setAuthenticated(false);
     setPasswordInput("");
     setSchedules([]);
     setSelectedId("");
@@ -215,7 +287,15 @@ export default function AdminPage() {
     setStatus("");
   }
 
-  if (!password) {
+  if (authenticated === null) {
+    return (
+      <main className="page admin-page">
+        <section className="section loading" role="status">管理画面を確認しています...</section>
+      </main>
+    );
+  }
+
+  if (!authenticated) {
     return (
       <main className="page admin-page">
         <header className="admin-header">
@@ -290,6 +370,7 @@ export default function AdminPage() {
 
           {selected.payload.matches.map((match) => {
             const isChecked = selected.checkedMatches.includes(match.match);
+            const allPlayers = match.courts.flatMap((court) => [...court.teamA, ...court.teamB]);
             return (
               <article className={`match ${isChecked ? "match-done" : ""} ${nextMatch === match.match ? "match-current" : ""}`} key={match.match}>
                 <label className="match-check">
@@ -305,9 +386,39 @@ export default function AdminPage() {
                   <div className="court" key={`${match.match}-${court.court}`}>
                     <div className="court-title">コート{court.court}</div>
                     <div className="versus">
-                      <span className="team-name">{formatTeam(court.teamA, selected.payload.names)}</span>
+                      <div className="admin-team-editor">
+                        {court.teamA.map((player, playerIndex) => (
+                          <select
+                            aria-label={`第${match.match}試合 コート${court.court} Aチーム ${playerIndex + 1}人目`}
+                            className="admin-player-select"
+                            disabled={saving}
+                            key={`a-${playerIndex}`}
+                            onChange={(event) => void replacePlayer(match.match, court.court - 1, "teamA", playerIndex as 0 | 1, Number(event.target.value))}
+                            value={player}
+                          >
+                            {selected.payload.names.map((name, index) => (
+                              <option disabled={index !== player && allPlayers.includes(index)} key={index} value={index}>{name}</option>
+                            ))}
+                          </select>
+                        ))}
+                      </div>
                       <span className="vs-mark">VS</span>
-                      <span className="team-name">{formatTeam(court.teamB, selected.payload.names)}</span>
+                      <div className="admin-team-editor">
+                        {court.teamB.map((player, playerIndex) => (
+                          <select
+                            aria-label={`第${match.match}試合 コート${court.court} Bチーム ${playerIndex + 1}人目`}
+                            className="admin-player-select"
+                            disabled={saving}
+                            key={`b-${playerIndex}`}
+                            onChange={(event) => void replacePlayer(match.match, court.court - 1, "teamB", playerIndex as 0 | 1, Number(event.target.value))}
+                            value={player}
+                          >
+                            {selected.payload.names.map((name, index) => (
+                              <option disabled={index !== player && allPlayers.includes(index)} key={index} value={index}>{name}</option>
+                            ))}
+                          </select>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ))}

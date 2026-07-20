@@ -202,6 +202,13 @@ export default function ShortSharePage() {
           if (Array.isArray(nextCheckedMatches)) {
             setCheckedMatches(new Set(nextCheckedMatches as number[]));
           }
+          if (event.new.payload) {
+            try {
+              setPayload(normalizePayload(event.new.payload as SharePayload | CompactSharePayload));
+            } catch {
+              // Ignore malformed realtime data and retain the previously loaded schedule.
+            }
+          }
         }
       )
       .subscribe();

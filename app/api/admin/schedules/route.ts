@@ -9,7 +9,7 @@ type ScheduleRow = {
 };
 
 export async function GET(request: Request) {
-  if (!isAdminRequest(request)) return unauthorizedResponse();
+  if (!await isAdminRequest(request)) return unauthorizedResponse();
 
   try {
     const { key, url } = getSupabaseAdminConfig();

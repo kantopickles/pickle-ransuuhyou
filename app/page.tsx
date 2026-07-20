@@ -667,7 +667,20 @@ export default function Home() {
     }
   }
 
-  function requestGenerate() {
+  async function requestGenerate() {
+    setPasswordChecking(true);
+    try {
+      const response = await fetch("/api/admin/verify", { cache: "no-store" });
+      if (response.ok) {
+        createSchedule();
+        return;
+      }
+    } catch {
+      // A network error falls back to the password prompt, which can refresh the session.
+    } finally {
+      setPasswordChecking(false);
+    }
+
     setPasswordInput("");
     setPasswordError("");
     setPasswordOpen(true);
@@ -1105,8 +1118,8 @@ export default function Home() {
 
       <div className="actions">
         {!schedule ? (
-          <button className="primary action-create" type="button" onClick={requestGenerate}>
-            乱数表を作成
+          <button className="primary action-create" type="button" onClick={() => void requestGenerate()} disabled={passwordChecking}>
+            {passwordChecking ? "確認中..." : "乱数表を作成"}
           </button>
         ) : (
           <>
@@ -1116,8 +1129,8 @@ export default function Home() {
             <button className="share" type="button" onClick={openShareModal}>
               共有リンク
             </button>
-            <button className="secondary" type="button" onClick={requestGenerate}>
-              {scheduleDirty ? "変更内容で再生成" : "再生成"}
+            <button className="secondary" type="button" onClick={() => void requestGenerate()} disabled={passwordChecking}>
+              {passwordChecking ? "確認中..." : scheduleDirty ? "変更内容で再生成" : "再生成"}
             </button>
           </>
         )}
@@ -1141,7 +1154,7 @@ export default function Home() {
                 setPasswordError("");
               }}
               onKeyDown={(event) => {
-                if (event.key === "Enter") confirmGenerate();
+                if (event.key === "Enter") void confirmGenerate();
                 if (event.key === "Escape") setPasswordOpen(false);
               }}
             />
