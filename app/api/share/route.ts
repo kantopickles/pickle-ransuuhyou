@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 const TABLE_NAME = "pickleball_shared_schedules";
 const TOKEN_TABLE_NAME = "pickleball_share_edit_tokens";
 const ID_CHARS = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const MAX_SAVED_SCHEDULES = 10;
 
 function createShareId(length = 8) {
   const bytes = crypto.getRandomValues(new Uint8Array(length));
@@ -29,6 +30,36 @@ function getSupabaseConfig() {
   }
 
   return { key, url };
+}
+
+async function removeSchedulesBeyondLimit(url: string, key: string) {
+  // Keep the newest ten schedules. Token rows are removed automatically by the
+  // foreign-key cascade, so old share links can no longer be opened either.
+  const schedulesResponse = await fetch(
+    `${url}/rest/v1/${TABLE_NAME}?select=id&order=created_at.desc,id.desc&offset=${MAX_SAVED_SCHEDULES}`,
+    {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`
+      }
+    }
+  );
+
+  if (!schedulesResponse.ok) return;
+  const schedules = (await schedulesResponse.json()) as { id: string }[];
+  if (schedules.length === 0) return;
+
+  const ids = schedules.map((schedule) => schedule.id).filter((id) => /^[A-Za-z0-9]+$/.test(id));
+  if (ids.length === 0) return;
+
+  await fetch(`${url}/rest/v1/${TABLE_NAME}?id=in.(${ids.join(",")})`, {
+    method: "DELETE",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      Prefer: "return=minimal"
+    }
+  });
 }
 
 export async function POST(request: Request) {
@@ -77,6 +108,7 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: message || "Failed to save edit token." }, { status: 500 });
         }
 
+        await removeSchedulesBeyondLimit(url, key);
         return NextResponse.json({ editToken, id });
       }
 
