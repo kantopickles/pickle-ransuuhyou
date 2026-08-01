@@ -85,6 +85,18 @@ button {
   text-underline-offset: 3px;
 }
 
+.import-notice {
+  background: #e7f7ed;
+  border: 1px solid #b9e0c6;
+  border-radius: 8px;
+  color: #17663d;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.5;
+  margin: 0 0 14px;
+  padding: 11px 13px;
+}
+
 .section {
   background: var(--panel);
   border: 1px solid var(--line);
