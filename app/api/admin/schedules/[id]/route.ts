@@ -5,6 +5,7 @@ function isValidId(id: string) {
 }
 
 type EditablePayload = {
+  title?: string;
   names: string[];
   matches: {
     match: number;
@@ -17,6 +18,7 @@ function normalizeEditablePayload(value: unknown): EditablePayload | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<EditablePayload>;
   if (!Array.isArray(candidate.names) || !candidate.names.every((name) => typeof name === "string")) return null;
+  if (candidate.title !== undefined && (typeof candidate.title !== "string" || candidate.title.length > 60)) return null;
   if (!Array.isArray(candidate.matches) || candidate.matches.length === 0 || candidate.matches.length > 20) return null;
 
   const participantCount = candidate.names.length;
@@ -47,7 +49,7 @@ function normalizeEditablePayload(value: unknown): EditablePayload | null {
     });
   }
 
-  return { names: candidate.names, matches };
+  return { names: candidate.names, matches, ...(candidate.title?.trim() ? { title: candidate.title.trim() } : {}) };
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {

@@ -26,6 +26,7 @@ type SharedStats = {
 };
 
 type SharePayload = {
+  title?: string;
   names: string[];
   matches: MatchPlan[];
 };
@@ -33,6 +34,7 @@ type SharePayload = {
 type CompactSharePayload = {
   n: string[];
   m: [number, number, number, number][][];
+  t?: string;
 };
 
 function addCount(map: Map<number, number>, key: number) {
@@ -42,6 +44,7 @@ function addCount(map: Map<number, number>, key: number) {
 function normalizePayload(payload: SharePayload | CompactSharePayload): SharePayload {
   if ("n" in payload && "m" in payload) {
     return {
+      title: payload.t,
       names: payload.n,
       matches: payload.m.map((game, gameIndex) => {
         const playing = new Set<number>();
@@ -250,7 +253,7 @@ export default function ShortSharePage() {
   return (
     <main className="page share-page">
       <header className="top">
-        <h1>乱数表</h1>
+        <h1>{payload?.title || "乱数表"}</h1>
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
 
@@ -260,7 +263,7 @@ export default function ShortSharePage() {
       {payload ? (
         <>
           <section className="section">
-            <h2>生成結果</h2>
+            <h2>{payload.title || "生成結果"}</h2>
             <div className="progress-panel" aria-live="polite">
               <div className="progress-copy">
                 <span className="progress-label">進行状況</span>

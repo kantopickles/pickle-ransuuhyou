@@ -24,6 +24,7 @@ type SharedStats = {
 };
 
 type SharePayload = {
+  title?: string;
   names: string[];
   matches: MatchPlan[];
 };
@@ -31,6 +32,7 @@ type SharePayload = {
 type CompactSharePayload = {
   n: string[];
   m: [number, [number, Team, Team][], number[]][] | [number, number, number, number][][];
+  t?: string;
 };
 
 function buildMatchesFromCompact(names: string[], games: [number, number, number, number][][]): MatchPlan[] {
@@ -72,6 +74,7 @@ function normalizePayload(parsed: SharePayload | CompactSharePayload): SharePayl
       const firstCourt = parsed.m[0][0];
       if (Array.isArray(firstCourt) && firstCourt.length === 4 && typeof firstCourt[0] === "number") {
         return {
+          title: parsed.t,
           names: parsed.n,
           matches: buildMatchesFromCompact(parsed.n, parsed.m as [number, number, number, number][][])
         };
@@ -79,6 +82,7 @@ function normalizePayload(parsed: SharePayload | CompactSharePayload): SharePayl
     }
 
     return {
+      title: parsed.t,
       names: parsed.n,
       matches: (parsed.m as [number, [number, Team, Team][], number[]][]).map(([match, courts, resting]) => ({
         match,
@@ -261,7 +265,7 @@ export default function SharePage() {
   return (
     <main className="page share-page">
       <header className="top">
-        <h1>乱数表</h1>
+        <h1>{payload?.title || "乱数表"}</h1>
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
 
@@ -271,7 +275,7 @@ export default function SharePage() {
       {payload ? (
         <>
           <section className="section">
-            <h2>生成結果</h2>
+            <h2>{payload.title || "生成結果"}</h2>
             {payload.matches.map((match) => (
               <article className="match" key={match.match}>
                 <h3>第{match.match}試合</h3>

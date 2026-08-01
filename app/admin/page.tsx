@@ -18,6 +18,7 @@ type MatchPlan = {
 };
 
 type SharePayload = {
+  title?: string;
   names: string[];
   matches: MatchPlan[];
 };
@@ -25,6 +26,7 @@ type SharePayload = {
 type CompactSharePayload = {
   n: string[];
   m: [number, number, number, number][][];
+  t?: string;
 };
 
 type ApiSchedule = {
@@ -42,6 +44,7 @@ type ManagedSchedule = Omit<ApiSchedule, "payload"> & {
 function normalizePayload(payload: SharePayload | CompactSharePayload): SharePayload {
   if ("n" in payload && "m" in payload) {
     return {
+      title: payload.t,
       names: payload.n,
       matches: payload.m.map((game, gameIndex) => {
         const playing = new Set<number>();
@@ -340,8 +343,8 @@ export default function AdminPage() {
           }}>
             一覧へ戻る
           </button>
-          <h1>{formatDate(selected.createdAt)}</h1>
-          <p>{selected.payload.names.length}人 / {total}試合</p>
+          <h1>{selected.payload.title || formatDate(selected.createdAt)}</h1>
+          <p>{selected.payload.title ? `${formatDate(selected.createdAt)} / ` : ""}{selected.payload.names.length}人 / {total}試合</p>
         </header>
 
         {error ? <div className="error" role="alert">{error}</div> : null}
@@ -461,7 +464,7 @@ export default function AdminPage() {
             setStatus("");
           }}>
             <span className="schedule-card-date">{formatDate(schedule.createdAt)}</span>
-            <strong>{schedule.payload.names.length}人 / {schedule.payload.matches.length}試合</strong>
+            <strong>{schedule.payload.title || `${schedule.payload.names.length}人 / ${schedule.payload.matches.length}試合`}</strong>
             <span className="schedule-card-progress">
               {schedule.checkedMatches.length}試合終了
             </span>

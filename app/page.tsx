@@ -39,6 +39,7 @@ type GeneratedSchedule = {
 type SharePayload = {
   n: string[];
   m: [number, number, number, number][][];
+  t?: string;
 };
 
 type ShareRecord = {
@@ -53,6 +54,7 @@ type StoredSchedule = {
   matches: MatchPlan[];
   names?: string[];
   participantCount?: number;
+  title?: string;
 };
 
 type GeneratedMeta = {
@@ -60,6 +62,7 @@ type GeneratedMeta = {
   matchCount: number;
   names: string[];
   participantCount: number;
+  title: string;
 };
 
 type Unit = {
@@ -404,17 +407,18 @@ function bytesToBase64Url(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function createSharePayload(schedule: GeneratedSchedule, names: string[]): SharePayload {
+function createSharePayload(schedule: GeneratedSchedule, names: string[], title: string): SharePayload {
   return {
     n: names,
     m: schedule.matches.map((match) =>
       match.courts.map((court) => [court.teamA[0], court.teamA[1], court.teamB[0], court.teamB[1]])
-    )
+    ),
+    ...(title ? { t: title } : {})
   };
 }
 
-async function encodeSharePayload(schedule: GeneratedSchedule, names: string[]) {
-  const payload = createSharePayload(schedule, names);
+async function encodeSharePayload(schedule: GeneratedSchedule, names: string[], title = "") {
+  const payload = createSharePayload(schedule, names, title);
   const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
 
@@ -431,6 +435,7 @@ export default function Home() {
   const [participantCount, setParticipantCount] = useState(10);
   const [courtCount, setCourtCount] = useState(2);
   const [matchCount, setMatchCount] = useState(20);
+  const [title, setTitle] = useState("");
   const [names, setNames] = useState<string[]>(() => createInitialNames(10));
   const [pairs, setPairs] = useState<PairSetting[]>([]);
   const [schedule, setSchedule] = useState<GeneratedSchedule | null>(null);
@@ -467,6 +472,7 @@ export default function Home() {
         participantCount?: number;
         courtCount?: number;
         matchCount?: number;
+        title?: string;
         names?: string[];
         pairs?: PairSetting[];
         schedule?: StoredSchedule | null;
@@ -481,6 +487,7 @@ export default function Home() {
       setParticipantCount(savedCount);
       setCourtCount(parsed.courtCount && COURT_OPTIONS.includes(parsed.courtCount) ? parsed.courtCount : 2);
       setMatchCount(parsed.matchCount && MATCH_OPTIONS.includes(parsed.matchCount) ? parsed.matchCount : 20);
+      setTitle(parsed.title ?? "");
       setNames(Array.from({ length: savedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
       setPairs(parsed.pairs ?? []);
       setCurrentShareId(parsed.shareId ?? "");
@@ -493,7 +500,8 @@ export default function Home() {
           courtCount: parsed.schedule.courtCount ?? parsed.courtCount ?? 2,
           matchCount: parsed.schedule.matchCount ?? parsed.matchCount ?? 20,
           names: parsed.schedule.names ?? Array.from({ length: savedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`),
-          participantCount: parsed.schedule.participantCount ?? savedCount
+          participantCount: parsed.schedule.participantCount ?? savedCount,
+          title: parsed.schedule.title ?? ""
         });
         setScheduleDirty(parsed.scheduleDirty ?? false);
       }
@@ -513,6 +521,7 @@ export default function Home() {
         checkedMatches: Array.from(checkedMatches),
         courtCount,
         matchCount,
+        title,
         names,
         pairs,
         participantCount,
@@ -523,7 +532,8 @@ export default function Home() {
               matchCount: generatedMeta?.matchCount,
               matches: schedule.matches,
               names: generatedMeta?.names,
-              participantCount: generatedMeta?.participantCount
+              participantCount: generatedMeta?.participantCount,
+              title: generatedMeta?.title
             }
           : null,
         scheduleDirty,
@@ -531,7 +541,7 @@ export default function Home() {
         shareId: currentShareId
       })
     );
-  }, [participantCount, courtCount, matchCount, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, storageLoaded]);
+  }, [participantCount, courtCount, matchCount, title, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, storageLoaded]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -608,7 +618,8 @@ export default function Home() {
   async function requestShareRecord(
     nextSchedule: GeneratedSchedule,
     nextNames: string[],
-    nextCheckedMatches: number[]
+    nextCheckedMatches: number[],
+    nextTitle: string
   ): Promise<ShareRecord | null> {
     try {
       const response = await fetch("/api/share", {
@@ -616,7 +627,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           checkedMatches: nextCheckedMatches,
-          payload: createSharePayload(nextSchedule, nextNames)
+          payload: createSharePayload(nextSchedule, nextNames, nextTitle)
         })
       });
 
@@ -629,8 +640,8 @@ export default function Home() {
     }
   }
 
-  function saveScheduleToHistory(nextSchedule: GeneratedSchedule, nextNames: string[]) {
-    const savePromise = requestShareRecord(nextSchedule, nextNames, []);
+  function saveScheduleToHistory(nextSchedule: GeneratedSchedule, nextNames: string[], nextTitle: string) {
+    const savePromise = requestShareRecord(nextSchedule, nextNames, [], nextTitle);
     pendingShareSave.current = savePromise;
 
     void savePromise.then((record) => {
@@ -648,12 +659,14 @@ export default function Home() {
 
     try {
       const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs);
+      const nextTitle = title.trim();
       setSchedule(nextSchedule);
       setGeneratedMeta({
         courtCount,
         matchCount,
         names: displayNames,
-        participantCount
+        participantCount,
+        title: nextTitle
       });
       setScheduleDirty(false);
       setCheckedMatches(new Set());
@@ -662,7 +675,7 @@ export default function Home() {
       setPairsOpen(false);
       setCurrentShareId("");
       setCurrentShareEditToken("");
-      saveScheduleToHistory(nextSchedule, displayNames);
+      saveScheduleToHistory(nextSchedule, displayNames, nextTitle);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "組み合わせを作成できませんでした。");
     }
@@ -744,7 +757,7 @@ export default function Home() {
     if (!nextShareUrl) {
       const record = pendingShareSave.current
         ? await pendingShareSave.current
-        : await requestShareRecord(schedule, scheduleNames, Array.from(checkedMatches));
+        : await requestShareRecord(schedule, scheduleNames, Array.from(checkedMatches), generatedMeta?.title ?? "");
 
       pendingShareSave.current = null;
       if (record) {
@@ -755,7 +768,7 @@ export default function Home() {
     }
 
     if (!nextShareUrl) {
-      const encoded = await encodeSharePayload(schedule, scheduleNames);
+      const encoded = await encodeSharePayload(schedule, scheduleNames, generatedMeta?.title ?? "");
       nextShareUrl = `${window.location.origin}/share#${encoded}`;
     }
 
@@ -913,6 +926,21 @@ export default function Home() {
               ))}
             </select>
           </div>
+
+          <div className="field schedule-title-field">
+            <label htmlFor="schedule-title">タイトル（任意）</label>
+            <input
+              className="input"
+              id="schedule-title"
+              maxLength={60}
+              placeholder="例：8月1日 練習会"
+              value={title}
+              onChange={(event) => {
+                markScheduleDirty();
+                setTitle(event.target.value);
+              }}
+            />
+          </div>
         </div> : null}
       </section>
 
@@ -1026,7 +1054,7 @@ export default function Home() {
       {error ? <div className="error" role="alert">{error}</div> : null}
 
       <section className="section">
-        <h2>生成結果</h2>
+        <h2>{generatedMeta?.title || "生成結果"}</h2>
         {!schedule ? <p className="empty">設定を入力して「乱数表を作成」を押してください。</p> : null}
         {schedule && generatedMeta ? (
           <p className="schedule-meta">
