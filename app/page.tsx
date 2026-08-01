@@ -75,6 +75,7 @@ const PARTICIPANT_OPTIONS = Array.from({ length: 17 }, (_, index) => index + 4);
 const COURT_OPTIONS = [1, 2, 3, 4, 5];
 const MATCH_OPTIONS = [5, 10, 15, 20];
 const STORAGE_KEY = "pickleball-randomizer-state-v1";
+const HISTORY_IMPORT_KEY = "pickleball-randomizer-history-import-v1";
 
 function createInitialNames(count: number) {
   return Array.from({ length: count }, (_, index) => `${index + 1}番`);
@@ -461,6 +462,44 @@ export default function Home() {
   const pendingShareSave = useRef<Promise<ShareRecord | null> | null>(null);
 
   useEffect(() => {
+    const imported = window.sessionStorage.getItem(HISTORY_IMPORT_KEY);
+    if (imported) {
+      window.sessionStorage.removeItem(HISTORY_IMPORT_KEY);
+
+      try {
+        const parsed = JSON.parse(imported) as {
+          participantCount?: number;
+          courtCount?: number;
+          matchCount?: number;
+          names?: string[];
+          title?: string;
+        };
+        const importedCount = parsed.participantCount && PARTICIPANT_OPTIONS.includes(parsed.participantCount)
+          ? parsed.participantCount
+          : 10;
+
+        setParticipantCount(importedCount);
+        setCourtCount(parsed.courtCount && COURT_OPTIONS.includes(parsed.courtCount) ? parsed.courtCount : 2);
+        setMatchCount(parsed.matchCount && MATCH_OPTIONS.includes(parsed.matchCount) ? parsed.matchCount : 20);
+        setTitle(typeof parsed.title === "string" ? parsed.title : "");
+        setNames(Array.from({ length: importedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
+        setPairs([]);
+        setSchedule(null);
+        setGeneratedMeta(null);
+        setCheckedMatches(new Set());
+        setCurrentShareId("");
+        setCurrentShareEditToken("");
+        setScheduleDirty(false);
+        setSettingsOpen(true);
+        setNamesOpen(true);
+        setPairsOpen(false);
+        setStorageLoaded(true);
+        return;
+      } catch {
+        // Ignore a malformed one-time import and restore the regular saved state.
+      }
+    }
+
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (!saved) {
       setStorageLoaded(true);

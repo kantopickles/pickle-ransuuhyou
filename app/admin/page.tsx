@@ -41,6 +41,8 @@ type ManagedSchedule = Omit<ApiSchedule, "payload"> & {
   payload: SharePayload;
 };
 
+const HISTORY_IMPORT_KEY = "pickleball-randomizer-history-import-v1";
+
 function normalizePayload(payload: SharePayload | CompactSharePayload): SharePayload {
   if ("n" in payload && "m" in payload) {
     return {
@@ -290,6 +292,20 @@ export default function AdminPage() {
     setStatus("");
   }
 
+  function startNewScheduleFromHistory() {
+    if (!selected) return;
+
+    const courtCount = Math.max(1, ...selected.payload.matches.map((match) => match.courts.length));
+    window.sessionStorage.setItem(HISTORY_IMPORT_KEY, JSON.stringify({
+      participantCount: selected.payload.names.length,
+      courtCount,
+      matchCount: selected.payload.matches.length,
+      names: selected.payload.names,
+      title: selected.payload.title ?? ""
+    }));
+    window.location.assign("/");
+  }
+
   if (authenticated === null) {
     return (
       <main className="page admin-page">
@@ -352,6 +368,9 @@ export default function AdminPage() {
 
         <section className="section">
           <div className="admin-detail-actions">
+            <button className="primary admin-reuse-button" type="button" onClick={startNewScheduleFromHistory}>
+              この情報で新規作成
+            </button>
             <a className="share admin-action-link" href={`/s/${selected.id}`} target="_blank" rel="noreferrer">
               共有画面を開く
             </a>
