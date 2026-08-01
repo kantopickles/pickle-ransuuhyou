@@ -76,6 +76,7 @@ const COURT_OPTIONS = [1, 2, 3, 4, 5];
 const MATCH_OPTIONS = [5, 10, 15, 20];
 const STORAGE_KEY = "pickleball-randomizer-state-v1";
 const HISTORY_IMPORT_KEY = "pickleball-randomizer-history-import-v1";
+const RECEPTION_IMPORT_PREFIX = "#reception=";
 
 function createInitialNames(count: number) {
   return Array.from({ length: count }, (_, index) => `${index + 1}番`);
@@ -458,10 +459,49 @@ export default function Home() {
   const [currentShareEditToken, setCurrentShareEditToken] = useState("");
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
+  const [importNotice, setImportNotice] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(false);
   const pendingShareSave = useRef<Promise<ShareRecord | null> | null>(null);
 
   useEffect(() => {
+    if (window.location.hash.startsWith(RECEPTION_IMPORT_PREFIX)) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(window.location.hash.slice(RECEPTION_IMPORT_PREFIX.length))) as {
+          names?: unknown;
+          title?: unknown;
+        };
+        const importedNames = Array.isArray(parsed.names)
+          ? parsed.names.filter((name): name is string => typeof name === "string").map((name) => name.trim()).filter(Boolean)
+          : [];
+
+        if (importedNames.length) {
+          const visibleNames = importedNames.slice(0, 20);
+          const importedCount = Math.max(4, visibleNames.length);
+          setParticipantCount(importedCount);
+          setTitle(typeof parsed.title === "string" ? parsed.title.trim() : "");
+          setNames(Array.from({ length: importedCount }, (_, index) => visibleNames[index] || `${index + 1}番`));
+          setPairs([]);
+          setSchedule(null);
+          setGeneratedMeta(null);
+          setCheckedMatches(new Set());
+          setCurrentShareId("");
+          setCurrentShareEditToken("");
+          setScheduleDirty(false);
+          setSettingsOpen(true);
+          setNamesOpen(true);
+          setPairsOpen(false);
+          setImportNotice(importedNames.length > 20
+            ? "受付票から先頭20名を取り込みました。乱数表は最大20名までです。"
+            : `受付票から${importedNames.length}名を取り込みました。`);
+          setStorageLoaded(true);
+          window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+          return;
+        }
+      } catch {
+        // Ignore malformed reception data and restore the regular saved state.
+      }
+    }
+
     const imported = window.sessionStorage.getItem(HISTORY_IMPORT_KEY);
     if (imported) {
       window.sessionStorage.removeItem(HISTORY_IMPORT_KEY);
@@ -893,6 +933,8 @@ export default function Home() {
         <a className="admin-link" href="https://pickleball-reception-jp.shady-box-8668.chatgpt.site/" target="_blank" rel="noopener noreferrer">受付票を開く ↗</a>
         <a className="admin-link" href="/admin">過去の乱数表</a>
       </nav>
+
+      {importNotice ? <div className="import-notice" role="status">✓ {importNotice}</div> : null}
 
       <section className="section collapsible">
         <button
