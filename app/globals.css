@@ -70,6 +70,8 @@ button {
 
 .utility-nav {
   display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
   justify-content: flex-end;
   margin: -4px 0 12px;
 }
