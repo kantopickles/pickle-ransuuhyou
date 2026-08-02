@@ -797,6 +797,10 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.admin-share-button {
+  grid-column: 1 / -1;
+}
+
 .admin-action-link {
   text-decoration: none;
 }

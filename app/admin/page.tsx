@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import QRCode from "qrcode";
 
 type Team = [number, number];
 
@@ -104,6 +105,10 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareQrCode, setShareQrCode] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
 
   const selected = useMemo(
     () => schedules.find((schedule) => schedule.id === selectedId) ?? null,
@@ -306,6 +311,46 @@ export default function AdminPage() {
     window.location.assign("/");
   }
 
+  async function openHistoryShareModal() {
+    if (!selected) return;
+
+    const url = `${window.location.origin}/s/${selected.id}`;
+    setShareUrl(url);
+    setShareQrCode("");
+    setShareCopied(false);
+    setShareModalOpen(true);
+
+    try {
+      const qrCode = await QRCode.toDataURL(url, {
+        errorCorrectionLevel: "L",
+        margin: 2,
+        width: 280
+      });
+      setShareQrCode(qrCode);
+    } catch {
+      setShareQrCode("");
+    }
+  }
+
+  async function copyHistoryShareUrl() {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = shareUrl;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+
+    setShareCopied(true);
+    window.setTimeout(() => setShareCopied(false), 1800);
+  }
+
   if (authenticated === null) {
     return (
       <main className="page admin-page">
@@ -370,6 +415,9 @@ export default function AdminPage() {
           <div className="admin-detail-actions">
             <button className="primary admin-reuse-button" type="button" onClick={startNewScheduleFromHistory}>
               この情報で新規作成
+            </button>
+            <button className="share admin-share-button" type="button" onClick={() => void openHistoryShareModal()}>
+              共有リンク・QR
             </button>
             <a className="share admin-action-link" href={`/s/${selected.id}`} target="_blank" rel="noreferrer">
               共有画面を開く
@@ -451,6 +499,35 @@ export default function AdminPage() {
             );
           })}
         </section>
+
+        {shareModalOpen ? (
+          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="admin-share-title" onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShareModalOpen(false);
+          }}>
+            <div className="modal share-modal">
+              <button className="modal-close" type="button" aria-label="閉じる" onClick={() => setShareModalOpen(false)}>×</button>
+              <h2 id="admin-share-title">共有リンク</h2>
+              <p>このQRコードかリンクを共有すると、過去の乱数表を見られます。</p>
+              {shareQrCode ? (
+                <div className="qr-box">
+                  <img src={shareQrCode} alt="過去の乱数表の共有QRコード" />
+                </div>
+              ) : (
+                <div className="section loading" role="status">QRコードを作成しています...</div>
+              )}
+              <div className="share-url-box">{shareUrl}</div>
+              {shareCopied ? <div className="success password-message" role="status">共有リンクをコピーしました</div> : null}
+              <div className="modal-actions">
+                <button className="secondary" type="button" onClick={() => setShareModalOpen(false)}>
+                  閉じる
+                </button>
+                <button className="primary" type="button" onClick={() => void copyHistoryShareUrl()}>
+                  リンクをコピー
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
     );
   }
