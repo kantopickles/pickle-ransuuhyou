@@ -11,6 +11,7 @@ type EditablePayload = {
     match: number;
     courts: { court: number; teamA: [number, number]; teamB: [number, number] }[];
     resting: number[];
+    participants?: number[];
   }[];
 };
 
@@ -42,10 +43,18 @@ function normalizeEditablePayload(value: unknown): EditablePayload | null {
       });
     }
 
+    const eligiblePlayers = Array.isArray(match.participants)
+      ? Array.from(new Set(match.participants.filter(
+          (player): player is number => Number.isInteger(player) && player >= 0 && player < participantCount
+        )))
+      : candidate.names.map((_, player) => player);
+    if (playing.size > eligiblePlayers.length || Array.from(playing).some((player) => !eligiblePlayers.includes(player))) return null;
+
     matches.push({
       match: matchIndex + 1,
       courts,
-      resting: candidate.names.map((_, player) => player).filter((player) => !playing.has(player))
+      resting: eligiblePlayers.filter((player) => !playing.has(player)),
+      ...(Array.isArray(match.participants) ? { participants: eligiblePlayers } : {})
     });
   }
 

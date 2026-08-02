@@ -16,6 +16,7 @@ type MatchPlan = {
   match: number;
   courts: CourtPlan[];
   resting: number[];
+  participants?: number[];
 };
 
 type SharePayload = {
@@ -88,9 +89,12 @@ function withUpdatedResting(payload: SharePayload): SharePayload {
     ...payload,
     matches: payload.matches.map((match) => {
       const playing = new Set(match.courts.flatMap((court) => [...court.teamA, ...court.teamB]));
+      const eligible = new Set(match.participants ?? payload.names.map((_, index) => index));
+      playing.forEach((player) => eligible.add(player));
       return {
         ...match,
-        resting: payload.names.map((_, index) => index).filter((player) => !playing.has(player))
+        resting: Array.from(eligible).filter((player) => !playing.has(player)),
+        ...(match.participants ? { participants: Array.from(eligible) } : {})
       };
     })
   };
@@ -311,6 +315,30 @@ export default function AdminPage() {
     window.location.assign("/");
   }
 
+  function continueScheduleWithSameLink() {
+    if (!selected) return;
+
+    const referenceMatch = selected.payload.matches.find((match) => !selected.checkedMatches.includes(match.match))
+      ?? selected.payload.matches.at(-1);
+    const activePlayers = referenceMatch?.participants
+      ?? selected.payload.names.map((_, index) => index);
+    const activeNames = activePlayers.map((player) => selected.payload.names[player]).filter(Boolean);
+    window.sessionStorage.setItem(HISTORY_IMPORT_KEY, JSON.stringify({
+      participantCount: activeNames.length,
+      courtCount: referenceMatch?.courts.length ?? 1,
+      matchCount: selected.payload.matches.length,
+      names: activeNames,
+      title: selected.payload.title ?? "",
+      continuation: {
+        checkedMatches: selected.checkedMatches,
+        originalMatches: selected.payload.matches,
+        originalNames: selected.payload.names,
+        shareId: selected.id
+      }
+    }));
+    window.location.assign("/");
+  }
+
   async function openHistoryShareModal() {
     if (!selected) return;
 
@@ -413,7 +441,10 @@ export default function AdminPage() {
 
         <section className="section">
           <div className="admin-detail-actions">
-            <button className="primary admin-reuse-button" type="button" onClick={startNewScheduleFromHistory}>
+            <button className="primary admin-continue-button" type="button" onClick={continueScheduleWithSameLink}>
+              このリンクのまま未終了分を再作成
+            </button>
+            <button className="secondary admin-reuse-button" type="button" onClick={startNewScheduleFromHistory}>
               この情報で新規作成
             </button>
             <button className="share admin-share-button" type="button" onClick={() => void openHistoryShareModal()}>

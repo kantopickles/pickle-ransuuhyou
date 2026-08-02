@@ -16,6 +16,7 @@ type MatchPlan = {
   match: number;
   courts: CourtPlan[];
   resting: number[];
+  participants?: number[];
 };
 
 type SharedStats = {
@@ -99,7 +100,9 @@ function createStats(payload: SharePayload): SharedStats[] {
       }
     }
 
+    const eligible = new Set(match.participants ?? payload.names.map((_, index) => index));
     stats.forEach((stat, index) => {
+      if (!eligible.has(index)) return;
       if (playing.has(index)) {
         stat.played += 1;
       } else {

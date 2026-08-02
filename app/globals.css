@@ -223,6 +223,17 @@ button {
   padding: 0 14px 14px;
 }
 
+.continuation-name-row {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 44px;
+}
+
+.continuation-add-player {
+  grid-column: 1 / -1;
+}
+
 .pairs {
   display: grid;
   gap: 10px;
@@ -793,6 +804,7 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.admin-continue-button,
 .admin-reuse-button {
   grid-column: 1 / -1;
 }

@@ -21,6 +21,7 @@ type MatchPlan = {
   match: number;
   courts: CourtPlan[];
   resting: number[];
+  participants?: number[];
 };
 
 type PlayerStats = {
@@ -63,6 +64,13 @@ type GeneratedMeta = {
   names: string[];
   participantCount: number;
   title: string;
+};
+
+type ContinuationContext = {
+  checkedMatches: number[];
+  originalMatches: MatchPlan[];
+  originalNames: string[];
+  shareId: string;
 };
 
 type Unit = {
@@ -282,8 +290,9 @@ function scoreCandidate(
   );
 }
 
-function applyMatchStats(courts: CourtPlan[], stats: PlayerStats[], participantCount: number) {
+function applyMatchStats(courts: CourtPlan[], stats: PlayerStats[], participantCount: number, eligiblePlayers?: number[]) {
   const playing = new Set<number>();
+  const eligible = new Set(eligiblePlayers ?? Array.from({ length: participantCount }, (_, index) => index));
 
   for (const court of courts) {
     const [a1, a2] = court.teamA;
@@ -303,7 +312,7 @@ function applyMatchStats(courts: CourtPlan[], stats: PlayerStats[], participantC
     }
   }
 
-  for (let player = 0; player < participantCount; player += 1) {
+  for (const player of eligible) {
     if (playing.has(player)) {
       stats[player].played += 1;
     } else {
@@ -311,14 +320,25 @@ function applyMatchStats(courts: CourtPlan[], stats: PlayerStats[], participantC
     }
   }
 
-  return Array.from({ length: participantCount }, (_, index) => index).filter((player) => !playing.has(player));
+  return Array.from(eligible).filter((player) => !playing.has(player));
+}
+
+function cloneStats(stats: PlayerStats[]) {
+  return stats.map((stat) => ({
+    played: stat.played,
+    rested: stat.rested,
+    partners: new Map(stat.partners),
+    opponents: new Map(stat.opponents)
+  }));
 }
 
 function generateSchedule(
   participantCount: number,
   requestedCourtCount: number,
   matchCount: number,
-  pairs: PairSetting[]
+  pairs: PairSetting[],
+  initialStats?: PlayerStats[],
+  initiallyRestedLastMatch?: Set<number>
 ): GeneratedSchedule {
   const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
 
@@ -334,9 +354,9 @@ function generateSchedule(
 
   const units = buildUnits(participantCount, fixedPairs);
   const targetPlayers = activeCourts * 4;
-  const stats = createStats(participantCount);
+  const stats = initialStats ? cloneStats(initialStats) : createStats(participantCount);
   const matches: MatchPlan[] = [];
-  let restedLastMatch = new Set<number>();
+  let restedLastMatch = new Set(initiallyRestedLastMatch ?? []);
 
   for (let matchIndex = 0; matchIndex < matchCount; matchIndex += 1) {
     let bestCourts: CourtPlan[] | null = null;
@@ -384,13 +404,133 @@ function rebuildSchedule(storedSchedule: StoredSchedule, fallbackParticipantCoun
   const stats = createStats(participantCount);
 
   for (const match of storedSchedule.matches) {
-    applyMatchStats(match.courts, stats, participantCount);
+    applyMatchStats(match.courts, stats, participantCount, match.participants);
   }
 
   return {
     activeCourts: storedSchedule.activeCourts,
     matches: storedSchedule.matches,
     stats
+  };
+}
+
+function buildContinuationSchedule(
+  context: ContinuationContext,
+  activeNames: string[],
+  requestedCourtCount: number,
+  requestedMatchCount: number,
+  pairs: PairSetting[]
+) {
+  const completedMatches = context.originalMatches
+    .filter((match) => context.checkedMatches.includes(match.match))
+    .sort((left, right) => left.match - right.match);
+
+  if (completedMatches.length > requestedMatchCount) {
+    throw new Error(`終了済みの${completedMatches.length}試合より、試合数を少なくすることはできません。`);
+  }
+
+  // Old names stay in the shared data so completed matches never change labels.
+  // Current participants are mapped onto those old IDs where possible; newcomers
+  // receive new IDs and are only eligible for the newly generated matches.
+  const mergedNames = [...context.originalNames];
+  const usedGlobalPlayers = new Set<number>();
+  const activeToGlobal = activeNames.map((name) => {
+    const existing = mergedNames.findIndex((candidate, index) => candidate === name && !usedGlobalPlayers.has(index));
+    const globalPlayer = existing >= 0 ? existing : mergedNames.push(name) - 1;
+    usedGlobalPlayers.add(globalPlayer);
+    return globalPlayer;
+  });
+  const globalToActive = new Map(activeToGlobal.map((globalPlayer, activePlayer) => [globalPlayer, activePlayer]));
+
+  const initialStats = createStats(activeNames.length);
+  for (const match of completedMatches) {
+    const eligible = new Set(match.participants ?? context.originalNames.map((_, index) => index));
+    const playing = new Set<number>();
+
+    for (const court of match.courts) {
+      const [a1, a2] = court.teamA;
+      const [b1, b2] = court.teamB;
+      for (const player of [a1, a2, b1, b2]) playing.add(player);
+
+      const activeA1 = globalToActive.get(a1);
+      const activeA2 = globalToActive.get(a2);
+      const activeB1 = globalToActive.get(b1);
+      const activeB2 = globalToActive.get(b2);
+      if (activeA1 !== undefined && activeA2 !== undefined) {
+        addCount(initialStats[activeA1].partners, activeA2);
+        addCount(initialStats[activeA2].partners, activeA1);
+      }
+      if (activeB1 !== undefined && activeB2 !== undefined) {
+        addCount(initialStats[activeB1].partners, activeB2);
+        addCount(initialStats[activeB2].partners, activeB1);
+      }
+      for (const teamPlayer of [activeA1, activeA2]) {
+        if (teamPlayer === undefined) continue;
+        for (const opponent of [activeB1, activeB2]) {
+          if (opponent === undefined) continue;
+          addCount(initialStats[teamPlayer].opponents, opponent);
+          addCount(initialStats[opponent].opponents, teamPlayer);
+        }
+      }
+    }
+
+    activeToGlobal.forEach((globalPlayer, activePlayer) => {
+      if (!eligible.has(globalPlayer)) return;
+      if (playing.has(globalPlayer)) initialStats[activePlayer].played += 1;
+      else initialStats[activePlayer].rested += 1;
+    });
+  }
+
+  const lastCompleted = completedMatches.at(-1);
+  const initiallyRested = new Set<number>();
+  if (lastCompleted) {
+    const playing = new Set(lastCompleted.courts.flatMap((court) => [...court.teamA, ...court.teamB]));
+    const eligible = new Set(lastCompleted.participants ?? context.originalNames.map((_, index) => index));
+    activeToGlobal.forEach((globalPlayer, activePlayer) => {
+      if (eligible.has(globalPlayer) && !playing.has(globalPlayer)) initiallyRested.add(activePlayer);
+    });
+  }
+
+  const remainingMatchCount = requestedMatchCount - completedMatches.length;
+  const generated = generateSchedule(
+    activeNames.length,
+    requestedCourtCount,
+    remainingMatchCount,
+    pairs,
+    initialStats,
+    initiallyRested
+  );
+  const preservedMatches = completedMatches.map((match, index) => ({
+    ...match,
+    match: index + 1,
+    participants: match.participants ?? context.originalNames.map((_, player) => player)
+  }));
+  const newMatches = generated.matches.map((match, index) => ({
+    ...match,
+    match: preservedMatches.length + index + 1,
+    courts: match.courts.map((court) => ({
+      ...court,
+      teamA: court.teamA.map((player) => activeToGlobal[player]) as Team,
+      teamB: court.teamB.map((player) => activeToGlobal[player]) as Team
+    })),
+    resting: match.resting.map((player) => activeToGlobal[player]),
+    participants: [...activeToGlobal]
+  }));
+  const matches = [...preservedMatches, ...newMatches];
+  const schedule = rebuildSchedule(
+    {
+      activeCourts: generated.activeCourts,
+      matches,
+      names: mergedNames,
+      participantCount: mergedNames.length
+    },
+    mergedNames.length
+  );
+
+  return {
+    checkedMatches: preservedMatches.map((match) => match.match),
+    names: mergedNames,
+    schedule
   };
 }
 
@@ -460,6 +600,7 @@ export default function Home() {
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
   const [importNotice, setImportNotice] = useState("");
+  const [continuation, setContinuation] = useState<ContinuationContext | null>(null);
   const [storageLoaded, setStorageLoaded] = useState(false);
   const pendingShareSave = useRef<Promise<ShareRecord | null> | null>(null);
 
@@ -513,6 +654,7 @@ export default function Home() {
           matchCount?: number;
           names?: string[];
           title?: string;
+          continuation?: ContinuationContext;
         };
         const importedCount = parsed.participantCount && PARTICIPANT_OPTIONS.includes(parsed.participantCount)
           ? parsed.participantCount
@@ -524,10 +666,33 @@ export default function Home() {
         setTitle(typeof parsed.title === "string" ? parsed.title : "");
         setNames(Array.from({ length: importedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
         setPairs([]);
-        setSchedule(null);
-        setGeneratedMeta(null);
-        setCheckedMatches(new Set());
-        setCurrentShareId("");
+        if (parsed.continuation) {
+          const context = parsed.continuation;
+          const activeCourts = Math.max(1, ...context.originalMatches.map((match) => match.courts.length));
+          setContinuation(context);
+          setSchedule(rebuildSchedule({
+            activeCourts,
+            matches: context.originalMatches,
+            names: context.originalNames,
+            participantCount: context.originalNames.length
+          }, context.originalNames.length));
+          setGeneratedMeta({
+            courtCount: parsed.courtCount ?? activeCourts,
+            matchCount: parsed.matchCount ?? context.originalMatches.length,
+            names: context.originalNames,
+            participantCount: importedCount,
+            title: typeof parsed.title === "string" ? parsed.title : ""
+          });
+          setCheckedMatches(new Set(context.checkedMatches));
+          setCurrentShareId(context.shareId);
+          setImportNotice("同じ共有リンクを保ったまま、未終了の試合だけ再生成するモードです。");
+        } else {
+          setContinuation(null);
+          setSchedule(null);
+          setGeneratedMeta(null);
+          setCheckedMatches(new Set());
+          setCurrentShareId("");
+        }
         setCurrentShareEditToken("");
         setScheduleDirty(false);
         setSettingsOpen(true);
@@ -559,6 +724,7 @@ export default function Home() {
         shareEditToken?: string;
         shareId?: string;
         checkedMatches?: number[];
+        continuation?: ContinuationContext | null;
       };
       const savedCount = parsed.participantCount && PARTICIPANT_OPTIONS.includes(parsed.participantCount)
         ? parsed.participantCount
@@ -571,6 +737,7 @@ export default function Home() {
       setPairs(parsed.pairs ?? []);
       setCurrentShareId(parsed.shareId ?? "");
       setCurrentShareEditToken(parsed.shareEditToken ?? "");
+      setContinuation(parsed.continuation ?? null);
       setCheckedMatches(new Set(parsed.checkedMatches ?? []));
       if (parsed.schedule) {
         setSchedule(rebuildSchedule(parsed.schedule, savedCount));
@@ -617,10 +784,11 @@ export default function Home() {
           : null,
         scheduleDirty,
         shareEditToken: currentShareEditToken,
-        shareId: currentShareId
+        shareId: currentShareId,
+        continuation
       })
     );
-  }, [participantCount, courtCount, matchCount, title, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, storageLoaded]);
+  }, [participantCount, courtCount, matchCount, title, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, storageLoaded]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -667,6 +835,36 @@ export default function Home() {
   function updateName(index: number, value: string) {
     markScheduleDirty();
     setNames((current) => current.map((name, nameIndex) => (nameIndex === index ? value : name)));
+  }
+
+  function addContinuationParticipant() {
+    if (participantCount >= 20) {
+      setError("参加人数は最大20人です。");
+      return;
+    }
+    markScheduleDirty();
+    setError("");
+    setParticipantCount((count) => count + 1);
+    setNames((current) => [...current, `${current.length + 1}番`]);
+  }
+
+  function removeContinuationParticipant(index: number) {
+    if (participantCount <= 4) {
+      setError("4人未満にはできません。");
+      return;
+    }
+    markScheduleDirty();
+    setError("");
+    setParticipantCount((count) => count - 1);
+    setNames((current) => current.filter((_, nameIndex) => nameIndex !== index));
+    setPairs((current) => current.flatMap((pair) => {
+      if (pair.a === index || pair.b === index) return [];
+      return [{
+        ...pair,
+        a: pair.a !== "" && pair.a > index ? pair.a - 1 : pair.a,
+        b: pair.b !== "" && pair.b > index ? pair.b - 1 : pair.b
+      }];
+    }));
   }
 
   function updatePair(id: string, side: "a" | "b", value: string) {
@@ -732,11 +930,55 @@ export default function Home() {
     });
   }
 
-  function createSchedule() {
+  async function createSchedule() {
     setShareCopied(false);
     setError("");
 
     try {
+      if (continuation) {
+        const nextTitle = title.trim();
+        const continued = buildContinuationSchedule(continuation, displayNames, courtCount, matchCount, pairs);
+        const response = await fetch(`/api/admin/schedules/${encodeURIComponent(continuation.shareId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            checkedMatches: continued.checkedMatches,
+            payload: {
+              ...(nextTitle ? { title: nextTitle } : {}),
+              names: continued.names,
+              matches: continued.schedule.matches
+            }
+          })
+        });
+        const result = (await response.json()) as { error?: string };
+        if (!response.ok) throw new Error(result.error || "共有リンクを更新できませんでした。");
+
+        const nextContext: ContinuationContext = {
+          checkedMatches: continued.checkedMatches,
+          originalMatches: continued.schedule.matches,
+          originalNames: continued.names,
+          shareId: continuation.shareId
+        };
+        setContinuation(nextContext);
+        setSchedule(continued.schedule);
+        setGeneratedMeta({
+          courtCount,
+          matchCount,
+          names: continued.names,
+          participantCount,
+          title: nextTitle
+        });
+        setCheckedMatches(new Set(continued.checkedMatches));
+        setScheduleDirty(false);
+        setSettingsOpen(false);
+        setNamesOpen(false);
+        setPairsOpen(false);
+        setCurrentShareId(continuation.shareId);
+        setCurrentShareEditToken("");
+        setImportNotice("未終了の試合を更新しました。参加者はこれまでと同じ共有リンクで確認できます。");
+        return;
+      }
+
       const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs);
       const nextTitle = title.trim();
       setSchedule(nextSchedule);
@@ -754,6 +996,7 @@ export default function Home() {
       setPairsOpen(false);
       setCurrentShareId("");
       setCurrentShareEditToken("");
+      setContinuation(null);
       saveScheduleToHistory(nextSchedule, displayNames, nextTitle);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "組み合わせを作成できませんでした。");
@@ -765,7 +1008,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/admin/verify", { cache: "no-store" });
       if (response.ok) {
-        createSchedule();
+        await createSchedule();
         return;
       }
     } catch {
@@ -801,7 +1044,7 @@ export default function Home() {
 
       setPasswordOpen(false);
       setPasswordInput("");
-      createSchedule();
+      await createSchedule();
     } catch {
       setPasswordError("パスワードを確認できませんでした。通信状態を確認してください。");
     } finally {
@@ -879,18 +1122,18 @@ export default function Home() {
   }
 
   function toggleMatchChecked(matchNumber: number) {
-    setCheckedMatches((current) => {
-      const next = new Set(current);
-      if (next.has(matchNumber)) {
-        next.delete(matchNumber);
-      } else {
-        next.add(matchNumber);
-      }
-      if (currentShareId && currentShareEditToken) {
-        void updateSharedChecks(Array.from(next).sort((left, right) => left - right));
-      }
-      return next;
-    });
+    const next = new Set(checkedMatches);
+    if (next.has(matchNumber)) next.delete(matchNumber);
+    else next.add(matchNumber);
+
+    const sorted = Array.from(next).sort((left, right) => left - right);
+    setCheckedMatches(next);
+    setContinuation((context) => context ? { ...context, checkedMatches: sorted } : context);
+    if (currentShareId && currentShareEditToken) {
+      void updateSharedChecks(sorted);
+    } else if (currentShareId && continuation) {
+      void updateAdminSharedChecks(sorted);
+    }
   }
 
   function scrollToNextMatch() {
@@ -915,6 +1158,18 @@ export default function Home() {
       });
     } catch {
       // ローカルのチェック状態は残します。通信が戻ったら次回の操作で再同期されます。
+    }
+  }
+
+  async function updateAdminSharedChecks(nextCheckedMatches: number[]) {
+    try {
+      await fetch(`/api/admin/schedules/${encodeURIComponent(currentShareId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checkedMatches: nextCheckedMatches })
+      });
+    } catch {
+      // Keep the local check state. A later operation can synchronize it again.
     }
   }
 
@@ -1044,17 +1299,29 @@ export default function Home() {
         {namesOpen ? (
           <div className="names">
             {names.map((name, index) => (
-              <div className="field" key={index}>
-                <label htmlFor={`name-${index}`}>{index + 1}人目</label>
-                <input
-                  className="input"
-                  id={`name-${index}`}
-                  inputMode="text"
-                  value={name}
-                  onChange={(event) => updateName(index, event.target.value)}
-                />
+              <div className={continuation ? "continuation-name-row" : "field"} key={index}>
+                <div className={continuation ? "field" : undefined}>
+                  <label htmlFor={`name-${index}`}>{index + 1}人目</label>
+                  <input
+                    className="input"
+                    id={`name-${index}`}
+                    inputMode="text"
+                    value={name}
+                    onChange={(event) => updateName(index, event.target.value)}
+                  />
+                </div>
+                {continuation ? (
+                  <button className="icon-button" type="button" aria-label={`${name || `${index + 1}人目`}を参加者から外す`} onClick={() => removeContinuationParticipant(index)}>
+                    ×
+                  </button>
+                ) : null}
               </div>
             ))}
+            {continuation ? (
+              <button className="secondary continuation-add-player" type="button" onClick={addContinuationParticipant} disabled={participantCount >= 20}>
+                参加者を追加
+              </button>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -1246,7 +1513,11 @@ export default function Home() {
               共有リンク
             </button>
             <button className="secondary" type="button" onClick={() => setRegenerateConfirmOpen(true)} disabled={passwordChecking}>
-              {passwordChecking ? "確認中..." : scheduleDirty ? "変更内容で再生成" : "再生成"}
+              {passwordChecking
+                ? "確認中..."
+                : continuation
+                  ? "未終了分を再生成"
+                  : scheduleDirty ? "変更内容で再生成" : "再生成"}
             </button>
           </>
         )}
@@ -1258,14 +1529,16 @@ export default function Home() {
         }}>
           <div className="modal">
             <button className="modal-close" type="button" aria-label="閉じる" onClick={() => setRegenerateConfirmOpen(false)}>×</button>
-            <h2 id="regenerate-title">再生成しますか？</h2>
-            <p>現在の乱数表は、新しい組み合わせに置き換わります。</p>
+            <h2 id="regenerate-title">{continuation ? "未終了の試合を再生成しますか？" : "再生成しますか？"}</h2>
+            <p>{continuation
+              ? "終了済みの試合と共有リンクはそのまま残し、未終了の試合だけ新しい組み合わせに変更します。"
+              : "現在の乱数表は、新しい組み合わせに置き換わります。"}</p>
             <div className="modal-actions">
               <button className="secondary" type="button" onClick={() => setRegenerateConfirmOpen(false)}>
                 キャンセル
               </button>
               <button className="primary" type="button" onClick={() => void confirmRegenerate()}>
-                再生成する
+                {continuation ? "未終了分を再生成" : "再生成する"}
               </button>
             </div>
           </div>
