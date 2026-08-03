@@ -601,6 +601,9 @@ export default function Home() {
   const [shareQrCode, setShareQrCode] = useState("");
   const [importNotice, setImportNotice] = useState("");
   const [continuation, setContinuation] = useState<ContinuationContext | null>(null);
+  const [editingMatchNumber, setEditingMatchNumber] = useState<number | null>(null);
+  const [matchEditSaving, setMatchEditSaving] = useState(false);
+  const [matchEditStatus, setMatchEditStatus] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(false);
   const pendingShareSave = useRef<Promise<ShareRecord | null> | null>(null);
 
@@ -1173,6 +1176,124 @@ export default function Home() {
     }
   }
 
+  async function syncEditedSchedule(nextSchedule: GeneratedSchedule) {
+    let shareId = currentShareId;
+    let editToken = currentShareEditToken;
+    let createdWithCurrentPayload = false;
+
+    if (!shareId) {
+      const pendingRecord = pendingShareSave.current
+        ? await pendingShareSave.current
+        : null;
+      pendingShareSave.current = null;
+      const record = pendingRecord ?? await requestShareRecord(
+        nextSchedule,
+        scheduleNames,
+        Array.from(checkedMatches),
+        generatedMeta?.title ?? ""
+      );
+      createdWithCurrentPayload = !pendingRecord && Boolean(record);
+      if (!record) throw new Error("共有データを保存できませんでした。");
+      shareId = record.id;
+      editToken = record.editToken;
+      setCurrentShareId(record.id);
+      setCurrentShareEditToken(record.editToken);
+    }
+
+    if (createdWithCurrentPayload) return;
+
+    const payload = {
+      ...(generatedMeta?.title ? { title: generatedMeta.title } : {}),
+      names: scheduleNames,
+      matches: nextSchedule.matches
+    };
+    const response = editToken
+      ? await fetch(`/api/share/${encodeURIComponent(shareId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            checkedMatches: Array.from(checkedMatches),
+            editToken,
+            payload
+          })
+        })
+      : await fetch(`/api/admin/schedules/${encodeURIComponent(shareId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            checkedMatches: Array.from(checkedMatches),
+            payload
+          })
+        });
+
+    if (!response.ok) throw new Error("共有先へ変更を反映できませんでした。");
+  }
+
+  async function changeScheduledPlayer(
+    matchNumber: number,
+    courtIndex: number,
+    team: "teamA" | "teamB",
+    playerIndex: 0 | 1,
+    nextPlayer: number
+  ) {
+    if (!schedule || matchEditSaving) return;
+    const targetMatch = schedule.matches.find((match) => match.match === matchNumber);
+    const targetCourt = targetMatch?.courts[courtIndex];
+    if (!targetMatch || !targetCourt) return;
+
+    const currentPlayer = targetCourt[team][playerIndex];
+    if (currentPlayer === nextPlayer) return;
+
+    const nextMatches = schedule.matches.map((match) => {
+      if (match.match !== matchNumber) return match;
+      const courts = match.courts.map((court) => ({
+        ...court,
+        teamA: [...court.teamA] as Team,
+        teamB: [...court.teamB] as Team
+      }));
+
+      for (let nextCourtIndex = 0; nextCourtIndex < courts.length; nextCourtIndex += 1) {
+        for (const nextTeam of ["teamA", "teamB"] as const) {
+          for (const nextPlayerIndex of [0, 1] as const) {
+            if (nextCourtIndex === courtIndex && nextTeam === team && nextPlayerIndex === playerIndex) continue;
+            if (courts[nextCourtIndex][nextTeam][nextPlayerIndex] === nextPlayer) {
+              courts[nextCourtIndex][nextTeam][nextPlayerIndex] = currentPlayer;
+            }
+          }
+        }
+      }
+      courts[courtIndex][team][playerIndex] = nextPlayer;
+
+      const playing = new Set(courts.flatMap((court) => [...court.teamA, ...court.teamB]));
+      const eligible = match.participants ?? scheduleNames.map((_, index) => index);
+      return {
+        ...match,
+        courts,
+        resting: eligible.filter((player) => !playing.has(player))
+      };
+    });
+    const nextSchedule = rebuildSchedule({
+      activeCourts: schedule.activeCourts,
+      matches: nextMatches,
+      names: scheduleNames,
+      participantCount: scheduleNames.length
+    }, scheduleNames.length);
+
+    setMatchEditSaving(true);
+    setMatchEditStatus("");
+    setError("");
+    try {
+      await syncEditedSchedule(nextSchedule);
+      setSchedule(nextSchedule);
+      setContinuation((context) => context ? { ...context, originalMatches: nextMatches } : context);
+      setMatchEditStatus("メンバー変更を共有先へ反映しました。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "メンバーを変更できませんでした。");
+    } finally {
+      setMatchEditSaving(false);
+    }
+  }
+
   return (
     <main className="page">
       <header className="top">
@@ -1401,6 +1522,7 @@ export default function Home() {
       </section>
 
       {error ? <div className="error" role="alert">{error}</div> : null}
+      {matchEditStatus ? <div className="success" role="status">{matchEditStatus}</div> : null}
 
       <section className="section">
         <h2>{generatedMeta?.title || "生成結果"}</h2>
@@ -1438,35 +1560,81 @@ export default function Home() {
             参加人数に合わせて、この表では{schedule.activeCourts}コート分を作成しています。
           </div>
         ) : null}
-        {schedule?.matches.map((match) => (
-          <article
-            className={`match ${checkedMatches.has(match.match) ? "match-done" : ""} ${nextMatchNumber === match.match ? "match-current" : ""}`}
-            id={`match-${match.match}`}
-            key={match.match}
-          >
-            <label className="match-check">
-              <input
-                type="checkbox"
-                checked={checkedMatches.has(match.match)}
-                onChange={() => toggleMatchChecked(match.match)}
-              />
-              <span>第{match.match}試合</span>
-            </label>
-            {match.courts.map((court) => (
-              <div className="court" key={`${match.match}-${court.court}`}>
-                <div className="court-title">コート{court.court}</div>
-                <div className="versus">
-                  <span className="team-name">{formatTeam(court.teamA, scheduleNames)}</span>
-                  <span className="vs-mark">VS</span>
-                  <span className="team-name">{formatTeam(court.teamB, scheduleNames)}</span>
-                </div>
+        {schedule?.matches.map((match) => {
+          const isEditing = editingMatchNumber === match.match;
+          const eligiblePlayers = match.participants ?? scheduleNames.map((_, index) => index);
+          return (
+            <article
+              className={`match ${checkedMatches.has(match.match) ? "match-done" : ""} ${nextMatchNumber === match.match ? "match-current" : ""}`}
+              id={`match-${match.match}`}
+              key={match.match}
+            >
+              <div className="match-heading-row">
+                <label className="match-check">
+                  <input
+                    type="checkbox"
+                    checked={checkedMatches.has(match.match)}
+                    onChange={() => toggleMatchChecked(match.match)}
+                  />
+                  <span>第{match.match}試合</span>
+                </label>
+                <button className="match-edit-button" type="button" onClick={() => {
+                  setEditingMatchNumber(isEditing ? null : match.match);
+                  setMatchEditStatus("");
+                }}>
+                  {isEditing ? "閉じる" : "メンバー変更"}
+                </button>
               </div>
-            ))}
-            <div className="rest">
-              休み：{match.resting.length ? match.resting.map((player) => scheduleNames[player]).join("、") : "なし"}
-            </div>
-          </article>
-        ))}
+              {match.courts.map((court, courtIndex) => (
+                <div className="court" key={`${match.match}-${court.court}`}>
+                  <div className="court-title">コート{court.court}</div>
+                  <div className="versus">
+                    {isEditing ? (
+                      <div className="admin-team-editor">
+                        {court.teamA.map((player, playerIndex) => (
+                          <select
+                            aria-label={`第${match.match}試合 コート${court.court} Aチーム ${playerIndex + 1}人目`}
+                            className="admin-player-select"
+                            disabled={matchEditSaving}
+                            key={`a-${playerIndex}`}
+                            onChange={(event) => void changeScheduledPlayer(match.match, courtIndex, "teamA", playerIndex as 0 | 1, Number(event.target.value))}
+                            value={player}
+                          >
+                            {eligiblePlayers.map((eligiblePlayer) => (
+                              <option key={eligiblePlayer} value={eligiblePlayer}>{scheduleNames[eligiblePlayer]}</option>
+                            ))}
+                          </select>
+                        ))}
+                      </div>
+                    ) : <span className="team-name">{formatTeam(court.teamA, scheduleNames)}</span>}
+                    <span className="vs-mark">VS</span>
+                    {isEditing ? (
+                      <div className="admin-team-editor">
+                        {court.teamB.map((player, playerIndex) => (
+                          <select
+                            aria-label={`第${match.match}試合 コート${court.court} Bチーム ${playerIndex + 1}人目`}
+                            className="admin-player-select"
+                            disabled={matchEditSaving}
+                            key={`b-${playerIndex}`}
+                            onChange={(event) => void changeScheduledPlayer(match.match, courtIndex, "teamB", playerIndex as 0 | 1, Number(event.target.value))}
+                            value={player}
+                          >
+                            {eligiblePlayers.map((eligiblePlayer) => (
+                              <option key={eligiblePlayer} value={eligiblePlayer}>{scheduleNames[eligiblePlayer]}</option>
+                            ))}
+                          </select>
+                        ))}
+                      </div>
+                    ) : <span className="team-name">{formatTeam(court.teamB, scheduleNames)}</span>}
+                  </div>
+                </div>
+              ))}
+              <div className="rest">
+                休み：{match.resting.length ? match.resting.map((player) => scheduleNames[player]).join("、") : "なし"}
+              </div>
+            </article>
+          );
+        })}
       </section>
 
       {schedule ? (

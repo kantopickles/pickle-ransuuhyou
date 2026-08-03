@@ -489,6 +489,31 @@ button:disabled {
   min-height: 42px;
 }
 
+.match-heading-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.match-heading-row .match-check {
+  margin-bottom: 0;
+}
+
+.match-edit-button {
+  background: #ffffff;
+  border: 1px solid #9acfc7;
+  border-radius: 6px;
+  color: var(--brand-dark);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 7px 10px;
+}
+
 .match-check input {
   accent-color: var(--brand);
   flex: 0 0 auto;
