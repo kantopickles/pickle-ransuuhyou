@@ -85,6 +85,17 @@ button {
   text-underline-offset: 3px;
 }
 
+.utility-reset {
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .import-notice {
   background: #e7f7ed;
   border: 1px solid #b9e0c6;

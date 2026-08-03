@@ -594,6 +594,7 @@ export default function Home() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordChecking, setPasswordChecking] = useState(false);
   const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [currentShareId, setCurrentShareId] = useState("");
   const [currentShareEditToken, setCurrentShareEditToken] = useState("");
@@ -1030,6 +1031,44 @@ export default function Home() {
     await requestGenerate();
   }
 
+  function resetCurrentState() {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.sessionStorage.removeItem(HISTORY_IMPORT_KEY);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+
+    setParticipantCount(10);
+    setCourtCount(2);
+    setMatchCount(20);
+    setTitle("");
+    setNames(createInitialNames(10));
+    setPairs([]);
+    setSchedule(null);
+    setGeneratedMeta(null);
+    setScheduleDirty(false);
+    setError("");
+    setShareCopied(false);
+    setCheckedMatches(new Set());
+    setSettingsOpen(true);
+    setNamesOpen(false);
+    setPairsOpen(false);
+    setPasswordOpen(false);
+    setPasswordInput("");
+    setPasswordError("");
+    setRegenerateConfirmOpen(false);
+    setResetConfirmOpen(false);
+    setShareModalOpen(false);
+    setCurrentShareId("");
+    setCurrentShareEditToken("");
+    setShareUrl("");
+    setShareQrCode("");
+    setImportNotice("");
+    setContinuation(null);
+    setEditingMatchNumber(null);
+    setMatchEditSaving(false);
+    setMatchEditStatus("");
+    pendingShareSave.current = null;
+  }
+
   async function confirmGenerate() {
     setPasswordChecking(true);
     setPasswordError("");
@@ -1308,6 +1347,7 @@ export default function Home() {
       <nav className="utility-nav" aria-label="管理">
         <a className="admin-link" href="https://pickleball-reception-jp.shady-box-8668.chatgpt.site/" target="_blank" rel="noopener noreferrer">受付票を開く ↗</a>
         <a className="admin-link" href="/admin">過去の乱数表</a>
+        <button className="utility-reset" type="button" onClick={() => setResetConfirmOpen(true)}>入力をリセット</button>
       </nav>
 
       {importNotice ? <div className="import-notice" role="status">✓ {importNotice}</div> : null}
@@ -1707,6 +1747,26 @@ export default function Home() {
               </button>
               <button className="primary" type="button" onClick={() => void confirmRegenerate()}>
                 {continuation ? "未終了分を再生成" : "再生成する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {resetConfirmOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reset-title" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setResetConfirmOpen(false);
+        }}>
+          <div className="modal">
+            <button className="modal-close" type="button" aria-label="閉じる" onClick={() => setResetConfirmOpen(false)}>×</button>
+            <h2 id="reset-title">入力内容をリセットしますか？</h2>
+            <p>この端末の参加者名・設定・生成結果を初期状態に戻します。過去の乱数表と共有リンクは削除されません。</p>
+            <div className="modal-actions">
+              <button className="secondary" type="button" onClick={() => setResetConfirmOpen(false)}>
+                キャンセル
+              </button>
+              <button className="danger-button" type="button" onClick={resetCurrentState}>
+                リセットする
               </button>
             </div>
           </div>

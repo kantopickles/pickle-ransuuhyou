@@ -19,6 +19,13 @@ type MatchPlan = {
   participants?: number[];
 };
 
+type SharedStats = {
+  played: number;
+  rested: number;
+  partners: Map<number, number>;
+  opponents: Map<number, number>;
+};
+
 type SharePayload = {
   title?: string;
   names: string[];
@@ -44,6 +51,65 @@ type ManagedSchedule = Omit<ApiSchedule, "payload"> & {
 };
 
 const HISTORY_IMPORT_KEY = "pickleball-randomizer-history-import-v1";
+
+function addCount(map: Map<number, number>, key: number) {
+  map.set(key, (map.get(key) ?? 0) + 1);
+}
+
+function createStats(payload: SharePayload): SharedStats[] {
+  const stats = payload.names.map(() => ({
+    played: 0,
+    rested: 0,
+    partners: new Map<number, number>(),
+    opponents: new Map<number, number>()
+  }));
+
+  for (const match of payload.matches) {
+    const playing = new Set<number>();
+
+    for (const court of match.courts) {
+      const [a1, a2] = court.teamA;
+      const [b1, b2] = court.teamB;
+
+      for (const player of [a1, a2, b1, b2]) playing.add(player);
+
+      addCount(stats[a1].partners, a2);
+      addCount(stats[a2].partners, a1);
+      addCount(stats[b1].partners, b2);
+      addCount(stats[b2].partners, b1);
+
+      for (const player of court.teamA) {
+        for (const opponent of court.teamB) {
+          addCount(stats[player].opponents, opponent);
+          addCount(stats[opponent].opponents, player);
+        }
+      }
+    }
+
+    const eligible = new Set(match.participants ?? payload.names.map((_, index) => index));
+    stats.forEach((stat, index) => {
+      if (!eligible.has(index)) return;
+      if (playing.has(index)) {
+        stat.played += 1;
+      } else {
+        stat.rested += 1;
+      }
+    });
+  }
+
+  return stats;
+}
+
+function mapNames(entries: Map<number, number>, names: string[]) {
+  const sorted = Array.from(entries.entries()).sort((left, right) => {
+    if (right[1] !== left[1]) return right[1] - left[1];
+    return (names[left[0]] ?? "").localeCompare(names[right[0]] ?? "", "ja");
+  });
+
+  return sorted.length
+    ? sorted.map(([index, count]) => `${names[index] ?? `${index + 1}番`}(${count})`).join("、")
+    : "-";
+}
 
 function normalizePayload(payload: SharePayload | CompactSharePayload): SharePayload {
   if ("n" in payload && "m" in payload) {
@@ -117,6 +183,10 @@ export default function AdminPage() {
   const selected = useMemo(
     () => schedules.find((schedule) => schedule.id === selectedId) ?? null,
     [schedules, selectedId]
+  );
+  const selectedStats = useMemo(
+    () => selected ? createStats(selected.payload) : [],
+    [selected]
   );
 
   useEffect(() => {
@@ -226,14 +296,33 @@ export default function AdminPage() {
       ...previousPayload,
       matches: previousPayload.matches.map((match) => {
         if (match.match !== matchNumber) return match;
+
+        const currentPlayer = match.courts[courtIndex][team][playerIndex];
+        const nextCourts = match.courts.map((court) => ({
+          ...court,
+          teamA: [...court.teamA] as Team,
+          teamB: [...court.teamB] as Team
+        }));
+
+        // 選んだ人がすでに出場中なら、現在の人とその出場枠を交換する。
+        // 休みの人を選んだ場合は該当する出場枠がないため、現在の枠だけを変更する。
+        nextCourts.forEach((court, nextCourtIndex) => {
+          (["teamA", "teamB"] as const).forEach((nextTeam) => {
+            court[nextTeam].forEach((player, nextPlayerIndex) => {
+              const isCurrentSlot = nextCourtIndex === courtIndex
+                && nextTeam === team
+                && nextPlayerIndex === playerIndex;
+              if (!isCurrentSlot && player === nextPlayer) {
+                court[nextTeam][nextPlayerIndex] = currentPlayer;
+              }
+            });
+          });
+        });
+
+        nextCourts[courtIndex][team][playerIndex] = nextPlayer;
         return {
           ...match,
-          courts: match.courts.map((court, index) => {
-            if (index !== courtIndex) return court;
-            const nextTeam: Team = [...court[team]] as Team;
-            nextTeam[playerIndex] = nextPlayer;
-            return { ...court, [team]: nextTeam };
-          })
+          courts: nextCourts
         };
       })
     });
@@ -471,7 +560,8 @@ export default function AdminPage() {
 
           {selected.payload.matches.map((match) => {
             const isChecked = selected.checkedMatches.includes(match.match);
-            const allPlayers = match.courts.flatMap((court) => [...court.teamA, ...court.teamB]);
+            const eligiblePlayers = match.participants
+              ?? selected.payload.names.map((_, index) => index);
             return (
               <article className={`match ${isChecked ? "match-done" : ""} ${nextMatch === match.match ? "match-current" : ""}`} key={match.match}>
                 <label className="match-check">
@@ -483,7 +573,7 @@ export default function AdminPage() {
                   />
                   <span>第{match.match}試合</span>
                 </label>
-                {match.courts.map((court) => (
+                {match.courts.map((court, courtIndex) => (
                   <div className="court" key={`${match.match}-${court.court}`}>
                     <div className="court-title">コート{court.court}</div>
                     <div className="versus">
@@ -494,11 +584,11 @@ export default function AdminPage() {
                             className="admin-player-select"
                             disabled={saving}
                             key={`a-${playerIndex}`}
-                            onChange={(event) => void replacePlayer(match.match, court.court - 1, "teamA", playerIndex as 0 | 1, Number(event.target.value))}
+                            onChange={(event) => void replacePlayer(match.match, courtIndex, "teamA", playerIndex as 0 | 1, Number(event.target.value))}
                             value={player}
                           >
-                            {selected.payload.names.map((name, index) => (
-                              <option disabled={index !== player && allPlayers.includes(index)} key={index} value={index}>{name}</option>
+                            {eligiblePlayers.map((eligiblePlayer) => (
+                              <option key={eligiblePlayer} value={eligiblePlayer}>{selected.payload.names[eligiblePlayer]}</option>
                             ))}
                           </select>
                         ))}
@@ -511,11 +601,11 @@ export default function AdminPage() {
                             className="admin-player-select"
                             disabled={saving}
                             key={`b-${playerIndex}`}
-                            onChange={(event) => void replacePlayer(match.match, court.court - 1, "teamB", playerIndex as 0 | 1, Number(event.target.value))}
+                            onChange={(event) => void replacePlayer(match.match, courtIndex, "teamB", playerIndex as 0 | 1, Number(event.target.value))}
                             value={player}
                           >
-                            {selected.payload.names.map((name, index) => (
-                              <option disabled={index !== player && allPlayers.includes(index)} key={index} value={index}>{name}</option>
+                            {eligiblePlayers.map((eligiblePlayer) => (
+                              <option key={eligiblePlayer} value={eligiblePlayer}>{selected.payload.names[eligiblePlayer]}</option>
                             ))}
                           </select>
                         ))}
@@ -529,6 +619,34 @@ export default function AdminPage() {
               </article>
             );
           })}
+        </section>
+
+        <section className="section">
+          <h2>集計</h2>
+          <div className="summary-wrap">
+            <table className="summary">
+              <thead>
+                <tr>
+                  <th>名前</th>
+                  <th>出場</th>
+                  <th>休み</th>
+                  <th>ペアになった相手</th>
+                  <th>対戦した相手</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedStats.map((stat, index) => (
+                  <tr key={index}>
+                    <td data-label="名前">{selected.payload.names[index]}</td>
+                    <td data-label="出場">{stat.played}回</td>
+                    <td data-label="休み">{stat.rested}回</td>
+                    <td data-label="ペア">{mapNames(stat.partners, selected.payload.names)}</td>
+                    <td data-label="対戦相手">{mapNames(stat.opponents, selected.payload.names)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         {shareModalOpen ? (
