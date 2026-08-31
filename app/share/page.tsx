@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ScheduleImageButton from "../components/ScheduleImageButton";
 
 type Team = [number, number];
 
@@ -329,6 +330,7 @@ export default function SharePage() {
           </section>
 
           <div className="actions read-only-actions">
+            <ScheduleImageButton payload={payload} />
             <button className="copy" type="button" onClick={handleCopy}>
               コピー
             </button>

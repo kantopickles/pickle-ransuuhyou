@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+import ScheduleImageButton from "../../components/ScheduleImageButton";
 
 type Team = [number, number];
 
@@ -330,6 +331,7 @@ export default function ShortSharePage() {
           </section>
 
           <div className="actions read-only-actions">
+            <ScheduleImageButton payload={payload} />
             <button className="copy" type="button" onClick={handleCopy}>
               コピー
             </button>

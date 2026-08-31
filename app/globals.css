@@ -337,11 +337,47 @@ button:disabled {
 }
 
 .read-only-actions {
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
 }
 
 .share-page {
   padding-bottom: 88px;
+}
+
+.image-save-error {
+  bottom: 76px;
+  left: 14px;
+  margin: 0;
+  position: fixed;
+  right: 14px;
+  z-index: 6;
+}
+
+.schedule-image-modal {
+  max-width: 560px;
+}
+
+.schedule-image-preview {
+  background: #e7efeb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: min(52dvh, 520px);
+  overflow: auto;
+  padding: 10px;
+}
+
+.schedule-image-preview img {
+  background: #fff;
+  display: block;
+  height: auto;
+  margin: 0 auto;
+  max-width: 100%;
+  width: 420px;
+}
+
+.schedule-image-hint {
+  font-size: 13px;
+  margin-top: 10px !important;
 }
 
 .modal-backdrop {
@@ -900,7 +936,7 @@ button:disabled {
   }
 
   .read-only-actions {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .modal-backdrop {
