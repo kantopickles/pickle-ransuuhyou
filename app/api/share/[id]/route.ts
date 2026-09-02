@@ -1,18 +1,6 @@
 import { NextResponse } from "next/server";
-
-const TABLE_NAME = "pickleball_shared_schedules";
-const TOKEN_TABLE_NAME = "pickleball_share_edit_tokens";
-
-function getSupabaseConfig() {
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) {
-    throw new Error("Supabase env vars are missing.");
-  }
-
-  return { key, url };
-}
+import { database, notifyScheduleUpdated, parseJson } from "../../../lib/cloudflare-data";
+import { isAdminRequest } from "../../admin/_utils";
 
 async function hashToken(token: string) {
   const bytes = new TextEncoder().encode(token);
@@ -79,25 +67,22 @@ function normalizeSchedulePayload(value: unknown) {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    const { key, url } = getSupabaseConfig();
-    const response = await fetch(`${url}/rest/v1/${TABLE_NAME}?id=eq.${encodeURIComponent(id)}&select=payload,checked_matches`, {
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`
-      }
-    });
+    const row = await database()
+      .prepare("SELECT payload, checked_matches FROM pickleball_shared_schedules WHERE id = ?")
+      .bind(id)
+      .first<{ checked_matches: string; payload: string }>();
 
-    if (!response.ok) {
-      const message = await response.text();
-      return NextResponse.json({ error: message || "Failed to load share." }, { status: 500 });
-    }
-
-    const rows = (await response.json()) as { checked_matches: number[] | null; payload: unknown }[];
-    if (rows.length === 0) {
+    if (!row) {
       return NextResponse.json({ error: "Share not found." }, { status: 404 });
     }
 
-    return NextResponse.json({ checkedMatches: rows[0].checked_matches ?? [], payload: rows[0].payload });
+    return NextResponse.json(
+      {
+        checkedMatches: parseJson<number[]>(row.checked_matches, []),
+        payload: parseJson<unknown>(row.payload, null)
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to load share." },
@@ -110,59 +95,48 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const { id } = await context.params;
     const body = await request.json() as { checkedMatches?: unknown; editToken?: string; payload?: unknown };
-    if (!body.editToken || (!Array.isArray(body.checkedMatches) && body.payload === undefined)) {
+    if (!Array.isArray(body.checkedMatches) && body.payload === undefined) {
       return NextResponse.json({ error: "Invalid request." }, { status: 400 });
     }
 
-    const { key, url } = getSupabaseConfig();
-    const tokenHash = await hashToken(body.editToken);
-    const tokenResponse = await fetch(
-      `${url}/rest/v1/${TOKEN_TABLE_NAME}?share_id=eq.${encodeURIComponent(id)}&token_hash=eq.${encodeURIComponent(tokenHash)}&select=share_id`,
-      {
-        headers: {
-          apikey: key,
-          Authorization: `Bearer ${key}`
-        }
-      }
-    );
-
-    if (!tokenResponse.ok) {
-      const message = await tokenResponse.text();
-      return NextResponse.json({ error: message || "Failed to validate edit token." }, { status: 500 });
+    // New schedules carry an edit token. Schedules imported from Supabase do not,
+    // so an authenticated administrator may update those rows without a token.
+    let hasValidEditToken = false;
+    if (body.editToken) {
+      const tokenHash = await hashToken(body.editToken);
+      const tokenRow = await database()
+        .prepare("SELECT share_id FROM pickleball_share_edit_tokens WHERE share_id = ? AND token_hash = ?")
+        .bind(id, tokenHash)
+        .first<{ share_id: string }>();
+      hasValidEditToken = Boolean(tokenRow);
     }
-
-    const tokenRows = (await tokenResponse.json()) as { share_id: string }[];
-    if (tokenRows.length === 0) {
+    if (!hasValidEditToken && !await isAdminRequest(request)) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     }
 
-    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    let checkedMatchesJson: string | null = null;
+    let payloadJson: string | null = null;
     if (Array.isArray(body.checkedMatches)) {
-      updates.checked_matches = Array.from(new Set(body.checkedMatches.filter(
+      checkedMatchesJson = JSON.stringify(Array.from(new Set(body.checkedMatches.filter(
         (match): match is number => Number.isInteger(match) && match > 0 && match <= 20
-      ))).sort((left, right) => left - right);
+      ))).sort((left, right) => left - right));
     }
     if (body.payload !== undefined) {
       const payload = normalizeSchedulePayload(body.payload);
       if (!payload) return NextResponse.json({ error: "Invalid schedule payload." }, { status: 400 });
-      updates.payload = payload;
+      payloadJson = JSON.stringify(payload);
     }
 
-    const response = await fetch(`${url}/rest/v1/${TABLE_NAME}?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal"
-      },
-      body: JSON.stringify(updates)
-    });
+    const result = await database().prepare(
+      `UPDATE pickleball_shared_schedules
+       SET checked_matches = COALESCE(?, checked_matches),
+           payload = COALESCE(?, payload),
+           updated_at = ?
+       WHERE id = ?`
+    ).bind(checkedMatchesJson, payloadJson, new Date().toISOString(), id).run();
 
-    if (!response.ok) {
-      const message = await response.text();
-      return NextResponse.json({ error: message || "Failed to update share." }, { status: 500 });
-    }
+    if (!result.meta.changes) return NextResponse.json({ error: "Share not found." }, { status: 404 });
+    await notifyScheduleUpdated(id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

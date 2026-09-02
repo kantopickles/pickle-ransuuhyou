@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
 import ScheduleImageButton from "../../components/ScheduleImageButton";
 
 type Team = [number, number];
@@ -189,39 +188,41 @@ export default function ShortSharePage() {
   }, [params.id]);
 
   useEffect(() => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey) return;
+    let stopped = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const channel = supabase
-      .channel(`pickleball-share-${params.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          filter: `id=eq.${params.id}`,
-          schema: "public",
-          table: "pickleball_shared_schedules"
-        },
-        (event) => {
-          const nextCheckedMatches = event.new.checked_matches;
-          if (Array.isArray(nextCheckedMatches)) {
-            setCheckedMatches(new Set(nextCheckedMatches as number[]));
-          }
-          if (event.new.payload) {
-            try {
-              setPayload(normalizePayload(event.new.payload as SharePayload | CompactSharePayload));
-            } catch {
-              // Ignore malformed realtime data and retain the previously loaded schedule.
-            }
-          }
-        }
-      )
-      .subscribe();
+    async function refreshPayload() {
+      try {
+        const response = await fetch(`/api/share/${encodeURIComponent(params.id)}`, { cache: "no-store" });
+        if (!response.ok || stopped) return;
+        const result = (await response.json()) as {
+          checkedMatches?: number[];
+          payload: SharePayload | CompactSharePayload;
+        };
+        setCheckedMatches(new Set(result.checkedMatches ?? []));
+        setPayload(normalizePayload(result.payload));
+      } catch {
+        // Keep the last successfully loaded schedule during a brief reconnect.
+      }
+    }
+
+    function connect() {
+      if (stopped) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime/${encodeURIComponent(params.id)}`);
+      socket.addEventListener("message", () => void refreshPayload());
+      socket.addEventListener("close", () => {
+        if (!stopped) reconnectTimer = window.setTimeout(connect, 1500);
+      });
+    }
+
+    connect();
 
     return () => {
-      void supabase.removeChannel(channel);
+      stopped = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      socket?.close();
     };
   }, [params.id]);
 

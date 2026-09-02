@@ -6,6 +6,10 @@ out
 .env.local
 .env.*.local
 *.log
+*.tsbuildinfo
 .DS_Store
 outputs
 work
+/dist/
+.vinext/
+.wrangler/

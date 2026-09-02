@@ -1,20 +1,6 @@
-const DEFAULT_ADMIN_PASSWORD = "kanto2025pickles";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export const ADMIN_SESSION_COOKIE = "pickleball_admin_session";
-
-export const SCHEDULE_TABLE = "pickleball_shared_schedules";
-
-export function getSupabaseAdminConfig() {
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) {
-    throw new Error("Supabase env vars are missing.");
-  }
-
-  return { key, url };
-}
 
 export const adminSessionCookieOptions = {
   httpOnly: true,
@@ -25,11 +11,11 @@ export const adminSessionCookieOptions = {
 };
 
 function getAdminPassword() {
-  return process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+  return process.env.ADMIN_PASSWORD ?? "";
 }
 
 function getSessionSecret() {
-  return process.env.ADMIN_SESSION_SECRET || `${getAdminPassword()}-pickleball-session`;
+  return process.env.ADMIN_SESSION_SECRET || `${getAdminPassword()}-local-development-only`;
 }
 
 function base64Url(bytes: Uint8Array) {

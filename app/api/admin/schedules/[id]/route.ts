@@ -1,4 +1,5 @@
-import { getSupabaseAdminConfig, isAdminRequest, SCHEDULE_TABLE, unauthorizedResponse } from "../../_utils";
+import { database, notifyScheduleUpdated } from "../../../../lib/cloudflare-data";
+import { isAdminRequest, unauthorizedResponse } from "../../_utils";
 
 function isValidId(id: string) {
   return /^[A-Za-z0-9]{6,20}$/.test(id);
@@ -71,35 +72,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return Response.json({ error: "入力内容が正しくありません。" }, { status: 400 });
     }
 
-    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    let checkedMatchesJson: string | null = null;
+    let payloadJson: string | null = null;
     if (Array.isArray(body.checkedMatches)) {
       const checkedMatches = body.checkedMatches.filter(
         (value): value is number => Number.isInteger(value) && value > 0 && value <= 20
       );
-      updates.checked_matches = Array.from(new Set(checkedMatches)).sort((left, right) => left - right);
+      checkedMatchesJson = JSON.stringify(Array.from(new Set(checkedMatches)).sort((left, right) => left - right));
     }
     if (body.payload !== undefined) {
       const payload = normalizeEditablePayload(body.payload);
       if (!payload) return Response.json({ error: "参加者の変更内容が正しくありません。" }, { status: 400 });
-      updates.payload = payload;
+      payloadJson = JSON.stringify(payload);
     }
 
-    const { key, url } = getSupabaseAdminConfig();
-    const response = await fetch(`${url}/rest/v1/${SCHEDULE_TABLE}?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal"
-      },
-      body: JSON.stringify(updates)
-    });
+    const result = await database().prepare(
+      `UPDATE pickleball_shared_schedules
+       SET checked_matches = COALESCE(?, checked_matches),
+           payload = COALESCE(?, payload),
+           updated_at = ?
+       WHERE id = ?`
+    ).bind(checkedMatchesJson, payloadJson, new Date().toISOString(), id).run();
 
-    if (!response.ok) {
-      const message = await response.text();
-      return Response.json({ error: message || "更新できませんでした。" }, { status: 500 });
-    }
+    if (!result.meta.changes) return Response.json({ error: "乱数表が見つかりません。" }, { status: 404 });
+    await notifyScheduleUpdated(id);
 
     return Response.json({ ok: true });
   } catch (error) {
@@ -119,20 +115,10 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       return Response.json({ error: "入力内容が正しくありません。" }, { status: 400 });
     }
 
-    const { key, url } = getSupabaseAdminConfig();
-    const response = await fetch(`${url}/rest/v1/${SCHEDULE_TABLE}?id=eq.${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Prefer: "return=minimal"
-      }
-    });
-
-    if (!response.ok) {
-      const message = await response.text();
-      return Response.json({ error: message || "削除できませんでした。" }, { status: 500 });
-    }
+    await database().batch([
+      database().prepare("DELETE FROM pickleball_share_edit_tokens WHERE share_id = ?").bind(id),
+      database().prepare("DELETE FROM pickleball_shared_schedules WHERE id = ?").bind(id)
+    ]);
 
     return Response.json({ ok: true });
   } catch (error) {
