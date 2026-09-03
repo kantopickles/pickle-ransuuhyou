@@ -1346,7 +1346,7 @@ export default function Home() {
 
       <nav className="utility-nav" aria-label="管理">
         <a className="admin-link" href="https://pickleball-reception-jp.shady-box-8668.chatgpt.site/" target="_blank" rel="noopener noreferrer">受付票を開く ↗</a>
-        <a className="admin-link" href="https://gym-availability-miyashiro-kuki.shady-box-8668.chatgpt.site/" target="_blank" rel="noopener noreferrer">体育館検索を開く ↗</a>
+        <a className="admin-link" href="https://gym-availability.kanto-pickles-draw.workers.dev/" target="_blank" rel="noopener noreferrer">体育館検索を開く ↗</a>
         <a className="admin-link" href="/admin">過去の乱数表</a>
         <button className="utility-reset" type="button" onClick={() => setResetConfirmOpen(true)}>入力をリセット</button>
       </nav>
