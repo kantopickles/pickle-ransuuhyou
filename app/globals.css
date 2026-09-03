@@ -28,6 +28,50 @@ body {
   min-height: 100vh;
 }
 
+.offline-page {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.offline-panel {
+  max-width: 420px;
+  text-align: center;
+}
+
+.offline-icon {
+  border-radius: 22px;
+  display: block;
+  margin: 0 auto 24px;
+}
+
+.offline-panel h1 {
+  font-size: 24px;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
+.offline-panel p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.7;
+  margin: 0 0 24px;
+}
+
+.offline-retry {
+  background: var(--brand);
+  border-radius: 8px;
+  color: #ffffff;
+  display: block;
+  font-size: 17px;
+  font-weight: 800;
+  min-height: 52px;
+  padding: 14px 24px;
+  text-decoration: none;
+}
+
 .sr-only {
   height: 1px;
   margin: -1px;

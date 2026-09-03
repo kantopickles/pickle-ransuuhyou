@@ -6,6 +6,14 @@
 - データ保存: Cloudflare D1 `pickleball-randomizer`
 - リアルタイム更新: Cloudflare Durable Objects / WebSocket
 - 保存件数: 新しいものから10件
+- PWA: iPhone・Androidのホーム画面へ追加可能
+
+## スマホへ追加する方法
+
+- iPhone: Safariで開き、共有ボタンから「ホーム画面に追加」を選びます。
+- Android: Chromeで開き、メニューから「アプリをインストール」または「ホーム画面に追加」を選びます。
+
+インストール後も同じCloudflare版へ接続します。アプリを更新するときは、通常どおりCloudflareへ公開すれば次回起動時に新しい版が取得されます。
 
 ## 普段の更新方法
 
