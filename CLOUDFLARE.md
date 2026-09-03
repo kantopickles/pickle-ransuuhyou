@@ -49,11 +49,11 @@ npx wrangler d1 export pickleball-randomizer --remote --output backup.sql
 
 `backup.sql`には参加者名や対戦表が含まれるため、公開場所へ置かないでください。
 
-## 旧サービスを停止する前の注意
+## 旧サービスの状態
 
-以前配った `pickle-ransuuhyou.vercel.app` の共有リンクは、Vercelを削除すると開けなくなります。Cloudflareには同じIDのデータを移してありますが、リンクのドメイン部分は自動では変わりません。
+2026年9月4日に、旧Supabase環境とVercelの `pickle-ransuuhyou` プロジェクトを削除しました。このアプリの稼働先はCloudflareだけです。
 
-旧リンクを今後も開けるようにするには、独自ドメインをCloudflareへ接続してから切り替える方法が確実です。過去のQRコードが不要だと確認できるまでは、VercelとSupabaseのプロジェクトを削除しないでください。
+以前配った `pickle-ransuuhyou.vercel.app` の共有リンクとQRコードは開けません。今後はCloudflare版で発行したリンクを使用してください。
 
 ## 障害時の確認
 
