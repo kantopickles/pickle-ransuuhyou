@@ -2,40 +2,16 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-
-type PairSetting = {
-  id: string;
-  a: number | "";
-  b: number | "";
-};
-
-type Team = [number, number];
-
-type CourtPlan = {
-  court: number;
-  teamA: Team;
-  teamB: Team;
-};
-
-type MatchPlan = {
-  match: number;
-  courts: CourtPlan[];
-  resting: number[];
-  participants?: number[];
-};
-
-type PlayerStats = {
-  played: number;
-  rested: number;
-  partners: Map<number, number>;
-  opponents: Map<number, number>;
-};
-
-type GeneratedSchedule = {
-  matches: MatchPlan[];
-  stats: PlayerStats[];
-  activeCourts: number;
-};
+import {
+  addCount,
+  applyMatchStats,
+  createStats,
+  generateSchedule,
+  type GeneratedSchedule,
+  type MatchPlan,
+  type PairSetting,
+  type Team
+} from "./lib/schedule-generator";
 
 type SharePayload = {
   n: string[];
@@ -73,12 +49,6 @@ type ContinuationContext = {
   shareId: string;
 };
 
-type Unit = {
-  id: string;
-  members: number[];
-  fixed: boolean;
-};
-
 const PARTICIPANT_OPTIONS = Array.from({ length: 17 }, (_, index) => index + 4);
 const COURT_OPTIONS = [1, 2, 3, 4, 5];
 const MATCH_OPTIONS = [5, 10, 15, 20];
@@ -90,14 +60,6 @@ function createInitialNames(count: number) {
   return Array.from({ length: count }, (_, index) => `${index + 1}番`);
 }
 
-function pairKey(a: number, b: number) {
-  return [Math.min(a, b), Math.max(a, b)].join("-");
-}
-
-function addCount(map: Map<number, number>, key: number, amount = 1) {
-  map.set(key, (map.get(key) ?? 0) + amount);
-}
-
 function mapNames(map: Map<number, number>, names: string[]) {
   const entries = Array.from(map.entries()).sort((left, right) => {
     if (right[1] !== left[1]) return right[1] - left[1];
@@ -107,296 +69,6 @@ function mapNames(map: Map<number, number>, names: string[]) {
   return entries.length
     ? entries.map(([index, count]) => `${names[index]}(${count})`).join("、")
     : "-";
-}
-
-function shuffle<T>(items: T[]) {
-  const copied = [...items];
-  for (let index = copied.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [copied[index], copied[swapIndex]] = [copied[swapIndex], copied[index]];
-  }
-  return copied;
-}
-
-function spread(values: number[]) {
-  return Math.max(...values) - Math.min(...values);
-}
-
-function createStats(count: number): PlayerStats[] {
-  return Array.from({ length: count }, () => ({
-    played: 0,
-    rested: 0,
-    partners: new Map<number, number>(),
-    opponents: new Map<number, number>()
-  }));
-}
-
-function normalizePairs(pairs: PairSetting[], participantCount: number) {
-  const used = new Set<number>();
-  const normalized: Team[] = [];
-
-  for (const pair of pairs) {
-    if (
-      pair.a === "" ||
-      pair.b === "" ||
-      pair.a === pair.b ||
-      pair.a < 0 ||
-      pair.b < 0 ||
-      pair.a >= participantCount ||
-      pair.b >= participantCount
-    ) {
-      continue;
-    }
-
-    if (used.has(pair.a) || used.has(pair.b)) continue;
-    used.add(pair.a);
-    used.add(pair.b);
-    normalized.push([pair.a, pair.b]);
-  }
-
-  return normalized;
-}
-
-function buildUnits(participantCount: number, fixedPairs: Team[]) {
-  const fixedMembers = new Set(fixedPairs.flat());
-  const units: Unit[] = fixedPairs.map((pair) => ({
-    id: `fixed-${pairKey(pair[0], pair[1])}`,
-    members: pair,
-    fixed: true
-  }));
-
-  for (let player = 0; player < participantCount; player += 1) {
-    if (!fixedMembers.has(player)) {
-      units.push({ id: `single-${player}`, members: [player], fixed: false });
-    }
-  }
-
-  return units;
-}
-
-function chooseCandidateUnits(
-  units: Unit[],
-  targetPlayers: number,
-  stats: PlayerStats[],
-  restedLastMatch: Set<number>
-) {
-  const selected: Unit[] = [];
-  let selectedPlayers = 0;
-
-  // 出場者選びは、固定ペアを1つの単位として扱います。
-  // ただし優先順位の一番上は個人の出場回数なので、出場回数が少ない人や
-  // 直前に休んだ人を少し選ばれやすくしてから、候補全体を後段で厳密に採点します。
-  const weighted = shuffle(units).sort((left, right) => {
-    const leftPlayed = left.members.reduce((sum, member) => sum + stats[member].played, 0) / left.members.length;
-    const rightPlayed = right.members.reduce((sum, member) => sum + stats[member].played, 0) / right.members.length;
-    const leftRestBonus = left.members.some((member) => restedLastMatch.has(member)) ? -0.35 : 0;
-    const rightRestBonus = right.members.some((member) => restedLastMatch.has(member)) ? -0.35 : 0;
-    return leftPlayed + leftRestBonus - (rightPlayed + rightRestBonus);
-  });
-
-  for (const unit of weighted) {
-    if (selectedPlayers + unit.members.length <= targetPlayers) {
-      selected.push(unit);
-      selectedPlayers += unit.members.length;
-    }
-    if (selectedPlayers === targetPlayers) break;
-  }
-
-  if (selectedPlayers !== targetPlayers) return null;
-  return selected;
-}
-
-function buildTeamsFromUnits(selectedUnits: Unit[]) {
-  const teams: Team[] = [];
-  const singles: number[] = [];
-
-  for (const unit of selectedUnits) {
-    if (unit.fixed) {
-      teams.push([unit.members[0], unit.members[1]]);
-    } else {
-      singles.push(unit.members[0]);
-    }
-  }
-
-  const shuffledSingles = shuffle(singles);
-  if (shuffledSingles.length % 2 !== 0) return null;
-
-  for (let index = 0; index < shuffledSingles.length; index += 2) {
-    teams.push([shuffledSingles[index], shuffledSingles[index + 1]]);
-  }
-
-  return shuffle(teams);
-}
-
-function buildCourts(teams: Team[], courtCount: number) {
-  const shuffledTeams = shuffle(teams);
-  const courts: CourtPlan[] = [];
-
-  if (shuffledTeams.length !== courtCount * 2) return null;
-
-  for (let index = 0; index < courtCount; index += 1) {
-    courts.push({
-      court: index + 1,
-      teamA: shuffledTeams[index * 2],
-      teamB: shuffledTeams[index * 2 + 1]
-    });
-  }
-
-  return courts;
-}
-
-function scoreCandidate(
-  courts: CourtPlan[],
-  participantCount: number,
-  stats: PlayerStats[],
-  restedLastMatch: Set<number>
-) {
-  const playing = new Set<number>();
-  const partnerRepeats: number[] = [];
-  const opponentRepeats: number[] = [];
-
-  for (const court of courts) {
-    for (const player of [...court.teamA, ...court.teamB]) {
-      playing.add(player);
-    }
-
-    partnerRepeats.push(stats[court.teamA[0]].partners.get(court.teamA[1]) ?? 0);
-    partnerRepeats.push(stats[court.teamB[0]].partners.get(court.teamB[1]) ?? 0);
-
-    for (const player of court.teamA) {
-      for (const opponent of court.teamB) {
-        opponentRepeats.push(stats[player].opponents.get(opponent) ?? 0);
-      }
-    }
-  }
-
-  const playedAfter = stats.map((stat, index) => stat.played + (playing.has(index) ? 1 : 0));
-  const restedAfter = stats.map((stat, index) => stat.rested + (playing.has(index) ? 0 : 1));
-  const consecutiveRestCount = Array.from(restedLastMatch).filter((player) => !playing.has(player)).length;
-
-  // スコアは小さいほど良いです。
-  // 重みは仕様の優先順位どおりに大きな段差を付けています。
-  // 1. 出場回数の平等: 最重要なので最大/最小差を圧倒的に重くします。
-  // 2. 休み回数の平等: 出場回数の次に重くします。
-  // 3. 直前に休んだ人の連続休み: なるべく避けます。
-  // 4. ペア重複、5. 対戦重複: 回数の偏りを壊さない範囲で避けます。
-  return (
-    spread(playedAfter) * 1_000_000 +
-    spread(restedAfter) * 120_000 +
-    consecutiveRestCount * 30_000 +
-    partnerRepeats.reduce((sum, count) => sum + count * count, 0) * 900 +
-    opponentRepeats.reduce((sum, count) => sum + count * count, 0) * 180 +
-    Math.random()
-  );
-}
-
-function applyMatchStats(courts: CourtPlan[], stats: PlayerStats[], participantCount: number, eligiblePlayers?: number[]) {
-  const playing = new Set<number>();
-  const eligible = new Set(eligiblePlayers ?? Array.from({ length: participantCount }, (_, index) => index));
-
-  for (const court of courts) {
-    const [a1, a2] = court.teamA;
-    const [b1, b2] = court.teamB;
-    for (const player of [a1, a2, b1, b2]) playing.add(player);
-
-    addCount(stats[a1].partners, a2);
-    addCount(stats[a2].partners, a1);
-    addCount(stats[b1].partners, b2);
-    addCount(stats[b2].partners, b1);
-
-    for (const player of court.teamA) {
-      for (const opponent of court.teamB) {
-        addCount(stats[player].opponents, opponent);
-        addCount(stats[opponent].opponents, player);
-      }
-    }
-  }
-
-  for (const player of eligible) {
-    if (playing.has(player)) {
-      stats[player].played += 1;
-    } else {
-      stats[player].rested += 1;
-    }
-  }
-
-  return Array.from(eligible).filter((player) => !playing.has(player));
-}
-
-function cloneStats(stats: PlayerStats[]) {
-  return stats.map((stat) => ({
-    played: stat.played,
-    rested: stat.rested,
-    partners: new Map(stat.partners),
-    opponents: new Map(stat.opponents)
-  }));
-}
-
-function generateSchedule(
-  participantCount: number,
-  requestedCourtCount: number,
-  matchCount: number,
-  pairs: PairSetting[],
-  initialStats?: PlayerStats[],
-  initiallyRestedLastMatch?: Set<number>
-): GeneratedSchedule {
-  const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
-
-  if (activeCourts < 1) {
-    throw new Error("4人以上で作成してください。");
-  }
-
-  const fixedPairs = normalizePairs(pairs, participantCount);
-  const fixedMembers = fixedPairs.flat();
-  if (new Set(fixedMembers).size !== fixedMembers.length) {
-    throw new Error("同じ参加者が複数の固定ペアに入っています。固定ペアを見直してください。");
-  }
-
-  const units = buildUnits(participantCount, fixedPairs);
-  const targetPlayers = activeCourts * 4;
-  const stats = initialStats ? cloneStats(initialStats) : createStats(participantCount);
-  const matches: MatchPlan[] = [];
-  let restedLastMatch = new Set(initiallyRestedLastMatch ?? []);
-
-  for (let matchIndex = 0; matchIndex < matchCount; matchIndex += 1) {
-    let bestCourts: CourtPlan[] | null = null;
-    let bestScore = Number.POSITIVE_INFINITY;
-
-    // 各試合ごとに複数候補を作り、スコアが最も低いものを採用します。
-    // 完全探索ではなく候補探索にしているため、スマホでも重くなりにくく、
-    // それでも公平性の主要条件はスコア重みで強く守る設計です。
-    for (let attempt = 0; attempt < 900; attempt += 1) {
-      const selectedUnits = chooseCandidateUnits(units, targetPlayers, stats, restedLastMatch);
-      if (!selectedUnits) continue;
-
-      const teams = buildTeamsFromUnits(selectedUnits);
-      if (!teams) continue;
-
-      const courts = buildCourts(teams, activeCourts);
-      if (!courts) continue;
-
-      const score = scoreCandidate(courts, participantCount, stats, restedLastMatch);
-      if (score < bestScore) {
-        bestCourts = courts;
-        bestScore = score;
-      }
-    }
-
-    if (!bestCourts) {
-      throw new Error("現在の参加人数・コート数・固定ペア数では、組み合わせを作成できません。固定ペアを減らすか、コート数を変更してください。");
-    }
-
-    const resting = applyMatchStats(bestCourts, stats, participantCount);
-    restedLastMatch = new Set(resting);
-
-    matches.push({
-      match: matchIndex + 1,
-      courts: bestCourts,
-      resting
-    });
-  }
-
-  return { matches, stats, activeCourts };
 }
 
 function rebuildSchedule(storedSchedule: StoredSchedule, fallbackParticipantCount: number): GeneratedSchedule {

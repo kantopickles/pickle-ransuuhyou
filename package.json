@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vinext dev --port 3000",
     "build": "vinext build",
+    "test": "node --test tests/*.test.ts",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "next lint",
     "deploy": "vinext-cloudflare deploy --config dist/server/wrangler.json",
