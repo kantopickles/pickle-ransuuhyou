@@ -741,6 +741,28 @@ button:disabled {
   padding: 10px;
 }
 
+.constraint-notice {
+  margin-top: 12px;
+}
+
+.status-action {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  margin-top: 6px;
+  min-height: 36px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.undo-change-button {
+  margin-bottom: 12px;
+  width: 100%;
+}
+
 .error {
   background: #fff7ed;
   border: 1px solid #fed7aa;
@@ -926,6 +948,10 @@ button:disabled {
 }
 
 .admin-share-button {
+  grid-column: 1 / -1;
+}
+
+.admin-undo-button {
   grid-column: 1 / -1;
 }
 

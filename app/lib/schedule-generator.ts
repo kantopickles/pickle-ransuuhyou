@@ -32,6 +32,12 @@ export type GeneratedSchedule = {
   activeCourts: number;
 };
 
+export type ScheduleConstraintAnalysis = {
+  activeCourts: number;
+  forcedPlayers: number[];
+  possible: boolean;
+};
+
 type Unit = {
   members: number[];
   fixed: boolean;
@@ -114,6 +120,43 @@ function buildUnits(participantCount: number, fixedPairs: Team[]) {
   return units;
 }
 
+function canFillPlayerCount(units: Unit[], targetPlayers: number) {
+  const reachable = new Set<number>([0]);
+  for (const unit of units) {
+    for (const count of Array.from(reachable).sort((left, right) => right - left)) {
+      const next = count + unit.members.length;
+      if (next <= targetPlayers) reachable.add(next);
+    }
+  }
+  return reachable.has(targetPlayers);
+}
+
+export function analyzeScheduleConstraints(
+  participantCount: number,
+  requestedCourtCount: number,
+  pairs: PairSetting[]
+): ScheduleConstraintAnalysis {
+  const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
+  if (activeCourts < 1) return { activeCourts: 0, forcedPlayers: [], possible: false };
+
+  const units = buildUnits(participantCount, normalizePairs(pairs, participantCount));
+  const targetPlayers = activeCourts * 4;
+  const possible = canFillPlayerCount(units, targetPlayers);
+  if (!possible || targetPlayers === participantCount) {
+    return { activeCourts, forcedPlayers: [], possible };
+  }
+
+  // そのユニットを除くと必要人数を満たせない場合、その参加者は毎試合出場必須です。
+  // 固定ペアによって完全な回数平等が不可能な条件を、生成前に画面で説明するために使います。
+  const forcedPlayers = units.flatMap((unit, unitIndex) => (
+    canFillPlayerCount(units.filter((_, index) => index !== unitIndex), targetPlayers)
+      ? []
+      : unit.members
+  ));
+
+  return { activeCourts, forcedPlayers, possible };
+}
+
 function enumerateUnitSelections(units: Unit[], targetPlayers: number) {
   const selections: Unit[][] = [];
 
@@ -142,12 +185,10 @@ function chooseCandidateUnits(
   restStreaks: number[],
   random: RandomSource
 ) {
-  const selected: Unit[] = [];
-  let selectedPlayers = 0;
-
   // 固定ペアは2人で1枠として選びます。大人数時は全組み合わせを調べると
   // スマホで重くなるため、出場の少ない人を軸にした候補を繰り返し作ります。
-  // 同程度の候補には揺らぎを入れ、ペア・対戦の偏りも後段で比較できるようにします。
+  // 並び順どおりの選択で必要人数に届かない場合は一つ前まで戻って別候補を試すため、
+  // 固定ペアが毎試合必須になる13人・3コート等でも、作成可能な候補を取り逃しません。
   const weighted = units
     .map((unit) => {
       const averagePlayed = unit.members.reduce((sum, member) => sum + stats[member].played, 0) / unit.members.length;
@@ -156,15 +197,32 @@ function chooseCandidateUnits(
     })
     .sort((left, right) => left.priority - right.priority);
 
-  for (const { unit } of weighted) {
-    if (selectedPlayers + unit.members.length <= targetPlayers) {
-      selected.push(unit);
-      selectedPlayers += unit.members.length;
-    }
-    if (selectedPlayers === targetPlayers) break;
+  const ordered = weighted.map(({ unit }) => unit);
+  const remainingPlayers = Array.from({ length: ordered.length + 1 }, () => 0);
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    remainingPlayers[index] = remainingPlayers[index + 1] + ordered[index].members.length;
   }
 
-  return selectedPlayers === targetPlayers ? selected : null;
+  function visit(index: number, selected: Unit[], selectedPlayers: number): Unit[] | null {
+    if (selectedPlayers === targetPlayers) return [...selected];
+    if (
+      index >= ordered.length ||
+      selectedPlayers > targetPlayers ||
+      selectedPlayers + remainingPlayers[index] < targetPlayers
+    ) return null;
+
+    const unit = ordered[index];
+    if (selectedPlayers + unit.members.length <= targetPlayers) {
+      selected.push(unit);
+      const included = visit(index + 1, selected, selectedPlayers + unit.members.length);
+      selected.pop();
+      if (included) return included;
+    }
+
+    return visit(index + 1, selected, selectedPlayers);
+  }
+
+  return visit(0, [], 0);
 }
 
 function buildTeamsFromUnits(selectedUnits: Unit[], random: RandomSource) {

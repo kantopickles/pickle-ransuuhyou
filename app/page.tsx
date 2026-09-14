@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import {
   addCount,
+  analyzeScheduleConstraints,
   applyMatchStats,
   createStats,
   generateSchedule,
@@ -41,6 +42,8 @@ type GeneratedMeta = {
   participantCount: number;
   title: string;
 };
+
+type SaveStatus = "" | "saving" | "saved" | "error";
 
 type ContinuationContext = {
   checkedMatches: number[];
@@ -277,8 +280,17 @@ export default function Home() {
   const [editingMatchNumber, setEditingMatchNumber] = useState<number | null>(null);
   const [matchEditSaving, setMatchEditSaving] = useState(false);
   const [matchEditStatus, setMatchEditStatus] = useState("");
+  const [editHistory, setEditHistory] = useState<GeneratedSchedule[]>([]);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("");
+  const [syncError, setSyncError] = useState("");
   const [storageLoaded, setStorageLoaded] = useState(false);
   const pendingShareSave = useRef<Promise<ShareRecord | null> | null>(null);
+  const latestCheckedMatches = useRef<number[]>([]);
+  const checkSyncQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    latestCheckedMatches.current = Array.from(checkedMatches).sort((left, right) => left - right);
+  }, [checkedMatches]);
 
   useEffect(() => {
     if (window.location.hash.startsWith(RECEPTION_IMPORT_PREFIX)) {
@@ -300,6 +312,7 @@ export default function Home() {
           setPairs([]);
           setSchedule(null);
           setGeneratedMeta(null);
+          setEditHistory([]);
           setCheckedMatches(new Set());
           setCurrentShareId("");
           setCurrentShareEditToken("");
@@ -369,6 +382,7 @@ export default function Home() {
           setCheckedMatches(new Set());
           setCurrentShareId("");
         }
+        setEditHistory([]);
         setCurrentShareEditToken("");
         setScheduleDirty(false);
         setSettingsOpen(true);
@@ -401,6 +415,7 @@ export default function Home() {
         shareId?: string;
         checkedMatches?: number[];
         continuation?: ContinuationContext | null;
+        editHistory?: StoredSchedule[];
       };
       const savedCount = parsed.participantCount && PARTICIPANT_OPTIONS.includes(parsed.participantCount)
         ? parsed.participantCount
@@ -415,6 +430,7 @@ export default function Home() {
       setCurrentShareEditToken(parsed.shareEditToken ?? "");
       setContinuation(parsed.continuation ?? null);
       setCheckedMatches(new Set(parsed.checkedMatches ?? []));
+      setEditHistory((parsed.editHistory ?? []).slice(-10).map((stored) => rebuildSchedule(stored, savedCount)));
       if (parsed.schedule) {
         setSchedule(rebuildSchedule(parsed.schedule, savedCount));
         setSettingsOpen(false);
@@ -461,10 +477,15 @@ export default function Home() {
         scheduleDirty,
         shareEditToken: currentShareEditToken,
         shareId: currentShareId,
-        continuation
+        continuation,
+        editHistory: editHistory.map((item) => ({
+          activeCourts: item.activeCourts,
+          matches: item.matches,
+          participantCount: generatedMeta?.names.length ?? participantCount
+        }))
       })
     );
-  }, [participantCount, courtCount, matchCount, title, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, storageLoaded]);
+  }, [participantCount, courtCount, matchCount, title, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, editHistory, storageLoaded]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -476,6 +497,11 @@ export default function Home() {
     ? schedule.matches.filter((match) => checkedMatches.has(match.match)).length
     : 0;
   const nextMatchNumber = schedule?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
+  const constraintAnalysis = useMemo(
+    () => analyzeScheduleConstraints(participantCount, courtCount, pairs),
+    [participantCount, courtCount, pairs]
+  );
+  const forcedPlayerNames = constraintAnalysis.forcedPlayers.map((player) => displayNames[player]);
 
   function markScheduleDirty() {
     if (schedule) {
@@ -594,16 +620,44 @@ export default function Home() {
   }
 
   function saveScheduleToHistory(nextSchedule: GeneratedSchedule, nextNames: string[], nextTitle: string) {
+    setSaveStatus("saving");
     const savePromise = requestShareRecord(nextSchedule, nextNames, [], nextTitle);
     pendingShareSave.current = savePromise;
 
-    void savePromise.then((record) => {
+    void savePromise.then(async (record) => {
       if (pendingShareSave.current !== savePromise) return;
       pendingShareSave.current = null;
-      if (!record) return;
+      if (!record) {
+        setSaveStatus("error");
+        return;
+      }
       setCurrentShareId(record.id);
       setCurrentShareEditToken(record.editToken);
+      setSaveStatus("saved");
+
+      // 保存完了を待つ間に試合チェックが付いた場合も、作成直後の共有先へ追送します。
+      if (latestCheckedMatches.current.length) {
+        try {
+          const response = await fetch(`/api/share/${encodeURIComponent(record.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              checkedMatches: latestCheckedMatches.current,
+              editToken: record.editToken
+            })
+          });
+          if (!response.ok) throw new Error("sync failed");
+        } catch {
+          setSyncError("チェックを共有先へ反映できませんでした。通信状態を確認して再同期してください。");
+        }
+      }
     });
+  }
+
+  function retryScheduleSave() {
+    if (!schedule) return;
+    setSyncError("");
+    saveScheduleToHistory(schedule, scheduleNames, generatedMeta?.title ?? "");
   }
 
   async function createSchedule() {
@@ -637,6 +691,9 @@ export default function Home() {
         };
         setContinuation(nextContext);
         setSchedule(continued.schedule);
+        setEditHistory([]);
+        setSaveStatus("saved");
+        setSyncError("");
         setGeneratedMeta({
           courtCount,
           matchCount,
@@ -658,6 +715,8 @@ export default function Home() {
       const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs);
       const nextTitle = title.trim();
       setSchedule(nextSchedule);
+      setEditHistory([]);
+      setSyncError("");
       setGeneratedMeta({
         courtCount,
         matchCount,
@@ -738,6 +797,9 @@ export default function Home() {
     setEditingMatchNumber(null);
     setMatchEditSaving(false);
     setMatchEditStatus("");
+    setEditHistory([]);
+    setSaveStatus("");
+    setSyncError("");
     pendingShareSave.current = null;
   }
 
@@ -800,6 +862,9 @@ export default function Home() {
         nextShareId = record.id;
         nextShareEditToken = record.editToken;
         nextShareUrl = `${window.location.origin}/s/${record.id}`;
+        setSaveStatus("saved");
+      } else {
+        setSaveStatus("error");
       }
     }
 
@@ -841,13 +906,18 @@ export default function Home() {
     else next.add(matchNumber);
 
     const sorted = Array.from(next).sort((left, right) => left - right);
+    latestCheckedMatches.current = sorted;
     setCheckedMatches(next);
     setContinuation((context) => context ? { ...context, checkedMatches: sorted } : context);
-    if (currentShareId && currentShareEditToken) {
-      void updateSharedChecks(sorted);
-    } else if (currentShareId && continuation) {
-      void updateAdminSharedChecks(sorted);
-    }
+    queueCheckSync(sorted);
+  }
+
+  function queueCheckSync(nextCheckedMatches: number[]) {
+    const run = async () => {
+      if (currentShareId && currentShareEditToken) await updateSharedChecks(nextCheckedMatches);
+      else if (currentShareId && continuation) await updateAdminSharedChecks(nextCheckedMatches);
+    };
+    checkSyncQueue.current = checkSyncQueue.current.then(run, run);
   }
 
   function scrollToNextMatch() {
@@ -859,8 +929,9 @@ export default function Home() {
   }
 
   async function updateSharedChecks(nextCheckedMatches: number[]) {
+    setSyncError("");
     try {
-      await fetch(`/api/share/${encodeURIComponent(currentShareId)}`, {
+      const response = await fetch(`/api/share/${encodeURIComponent(currentShareId)}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json"
@@ -870,21 +941,30 @@ export default function Home() {
           editToken: currentShareEditToken
         })
       });
+      if (!response.ok) throw new Error("sync failed");
     } catch {
-      // ローカルのチェック状態は残します。通信が戻ったら次回の操作で再同期されます。
+      setSyncError("チェックを共有先へ反映できませんでした。通信状態を確認して再同期してください。");
     }
   }
 
   async function updateAdminSharedChecks(nextCheckedMatches: number[]) {
+    setSyncError("");
     try {
-      await fetch(`/api/admin/schedules/${encodeURIComponent(currentShareId)}`, {
+      const response = await fetch(`/api/admin/schedules/${encodeURIComponent(currentShareId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ checkedMatches: nextCheckedMatches })
       });
+      if (!response.ok) throw new Error("sync failed");
     } catch {
-      // Keep the local check state. A later operation can synchronize it again.
+      setSyncError("チェックを共有先へ反映できませんでした。通信状態を確認して再同期してください。");
     }
+  }
+
+  async function retryCheckSync() {
+    const sorted = Array.from(checkedMatches).sort((left, right) => left - right);
+    queueCheckSync(sorted);
+    await checkSyncQueue.current;
   }
 
   async function syncEditedSchedule(nextSchedule: GeneratedSchedule) {
@@ -993,13 +1073,39 @@ export default function Home() {
     setMatchEditSaving(true);
     setMatchEditStatus("");
     setError("");
+    setSyncError("");
     try {
       await syncEditedSchedule(nextSchedule);
+      setEditHistory((current) => [...current, schedule].slice(-10));
       setSchedule(nextSchedule);
       setContinuation((context) => context ? { ...context, originalMatches: nextMatches } : context);
       setMatchEditStatus("メンバー変更を共有先へ反映しました。");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "メンバーを変更できませんでした。");
+    } finally {
+      setMatchEditSaving(false);
+    }
+  }
+
+  async function undoLastPlayerChange() {
+    if (!schedule || !editHistory.length || matchEditSaving) return;
+    const previousSchedule = editHistory.at(-1);
+    if (!previousSchedule) return;
+
+    setMatchEditSaving(true);
+    setMatchEditStatus("");
+    setError("");
+    setSyncError("");
+    try {
+      await syncEditedSchedule(previousSchedule);
+      setSchedule(previousSchedule);
+      setContinuation((context) => context
+        ? { ...context, originalMatches: previousSchedule.matches }
+        : context);
+      setEditHistory((current) => current.slice(0, -1));
+      setMatchEditStatus("直前のメンバー変更を元に戻し、共有先へ反映しました。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "変更を元に戻せませんでした。");
     } finally {
       setMatchEditSaving(false);
     }
@@ -1232,9 +1338,28 @@ export default function Home() {
             </button>
           </div>
         ) : null}
+        {forcedPlayerNames.length ? (
+          <div className="notice constraint-notice" role="status">
+            この条件では、{forcedPlayerNames.join("・")}は毎試合出場する必要があります。
+            固定ペアを守るため、出場回数を完全に平等にはできません。
+          </div>
+        ) : null}
       </section>
 
       {error ? <div className="error" role="alert">{error}</div> : null}
+      {saveStatus === "saving" ? <div className="notice" role="status">履歴・共有データを保存しています...</div> : null}
+      {saveStatus === "error" ? (
+        <div className="error" role="alert">
+          端末には残っていますが、履歴・共有データを保存できませんでした。
+          <button className="status-action" type="button" onClick={retryScheduleSave}>保存を再試行</button>
+        </div>
+      ) : null}
+      {syncError ? (
+        <div className="error" role="alert">
+          {syncError}
+          <button className="status-action" type="button" onClick={() => void retryCheckSync()}>再同期</button>
+        </div>
+      ) : null}
       {matchEditStatus ? <div className="success" role="status">{matchEditStatus}</div> : null}
 
       <section className="section">
@@ -1244,6 +1369,16 @@ export default function Home() {
           <p className="schedule-meta">
             表示中：{generatedMeta.participantCount}人 / {generatedMeta.courtCount}コート / {generatedMeta.matchCount}試合
           </p>
+        ) : null}
+        {schedule && editHistory.length ? (
+          <button
+            className="secondary undo-change-button"
+            type="button"
+            onClick={() => void undoLastPlayerChange()}
+            disabled={matchEditSaving}
+          >
+            直前のメンバー変更を元に戻す（残り{editHistory.length}回）
+          </button>
         ) : null}
         {schedule ? (
           <div className="progress-panel" aria-live="polite">

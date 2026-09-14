@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateSchedule, type GeneratedSchedule } from "../app/lib/schedule-generator.ts";
+import {
+  analyzeScheduleConstraints,
+  generateSchedule,
+  type GeneratedSchedule,
+  type PairSetting
+} from "../app/lib/schedule-generator.ts";
 
 function seededRandom(seed: number) {
   let value = seed >>> 0;
@@ -63,5 +68,94 @@ test("8人・1コート・固定1組でも休みと通常ペアが偏りすぎ�
       }
     }
     assert.ok(largestNormalPairCount <= 4, `seed ${seed}: 通常ペアが${largestNormalPairCount}回重複`);
+  }
+});
+
+function assertScheduleIntegrity(
+  schedule: GeneratedSchedule,
+  participantCount: number,
+  requestedCourtCount: number,
+  fixedPairs: PairSetting[]
+) {
+  const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
+  assert.equal(schedule.activeCourts, activeCourts);
+  assert.equal(schedule.matches.length, 20);
+
+  for (const match of schedule.matches) {
+    assert.equal(match.courts.length, activeCourts);
+    const playing = match.courts.flatMap((court) => [...court.teamA, ...court.teamB]);
+    assert.equal(new Set(playing).size, activeCourts * 4, "同じ試合に同一参加者が重複している");
+
+    const expectedResting = Array.from({ length: participantCount }, (_, player) => player)
+      .filter((player) => !playing.includes(player));
+    assert.deepEqual([...match.resting].sort((a, b) => a - b), expectedResting);
+
+    for (const pair of fixedPairs) {
+      if (pair.a === "" || pair.b === "") continue;
+      const pairPlaying = playing.includes(pair.a) || playing.includes(pair.b);
+      if (!pairPlaying) continue;
+      assert.ok(playing.includes(pair.a) && playing.includes(pair.b), "固定ペアの片方だけが出場している");
+      assert.ok(
+        match.courts.flatMap((court) => [court.teamA, court.teamB])
+          .some((team) => team.includes(pair.a as number) && team.includes(pair.b as number)),
+        "固定ペアが別チームになっている"
+      );
+    }
+  }
+
+  for (let player = 0; player < participantCount; player += 1) {
+    const actualPlayed = schedule.matches.filter((match) => !match.resting.includes(player)).length;
+    assert.equal(schedule.stats[player].played, actualPlayed);
+    assert.equal(schedule.stats[player].rested, 20 - actualPlayed);
+  }
+}
+
+test("4〜20人・1〜5コート・固定ペア0〜複数組で必ず正しい表を作る", () => {
+  let seed = 100;
+  for (let participantCount = 4; participantCount <= 20; participantCount += 1) {
+    for (let courtCount = 1; courtCount <= 5; courtCount += 1) {
+      const pairPatterns: PairSetting[][] = [
+        [],
+        [{ id: "fixed-1", a: 0, b: 1 }],
+        [
+          { id: "fixed-1", a: 0, b: 1 },
+          { id: "fixed-2", a: 2, b: 3 }
+        ]
+      ];
+
+      for (const fixedPairs of pairPatterns) {
+        const analysis = analyzeScheduleConstraints(participantCount, courtCount, fixedPairs);
+        assert.equal(analysis.possible, true);
+        const schedule = generateSchedule(
+          participantCount,
+          courtCount,
+          20,
+          fixedPairs,
+          undefined,
+          undefined,
+          seededRandom(seed)
+        );
+        assertScheduleIntegrity(schedule, participantCount, courtCount, fixedPairs);
+        seed += 1;
+      }
+    }
+  }
+});
+
+test("固定ペアが毎試合必須になる条件を生成前に検出する", () => {
+  for (const [participantCount, courtCount] of [[5, 1], [9, 2], [13, 3], [17, 4]]) {
+    const pairs: PairSetting[] = [{ id: "fixed", a: 0, b: 1 }];
+    const analysis = analyzeScheduleConstraints(participantCount, courtCount, pairs);
+    assert.equal(analysis.possible, true);
+    assert.deepEqual(analysis.forcedPlayers, [0, 1]);
+    assert.doesNotThrow(() => generateSchedule(
+      participantCount,
+      courtCount,
+      20,
+      pairs,
+      undefined,
+      undefined,
+      seededRandom(participantCount)
+    ));
   }
 });

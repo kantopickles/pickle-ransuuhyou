@@ -179,6 +179,7 @@ export default function AdminPage() {
   const [shareUrl, setShareUrl] = useState("");
   const [shareQrCode, setShareQrCode] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
+  const [editHistory, setEditHistory] = useState<SharePayload[]>([]);
 
   const selected = useMemo(
     () => schedules.find((schedule) => schedule.id === selectedId) ?? null,
@@ -192,6 +193,10 @@ export default function AdminPage() {
   useEffect(() => {
     void loadSchedules();
   }, []);
+
+  useEffect(() => {
+    setEditHistory([]);
+  }, [selectedId]);
 
   async function loadSchedules() {
     setLoading(true);
@@ -342,12 +347,46 @@ export default function AdminPage() {
       });
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error || "参加者を変更できませんでした。");
+      setEditHistory((current) => [...current, previousPayload].slice(-10));
       setStatus("参加者の変更を共有先へ反映しました。");
     } catch (caught) {
       setSchedules((current) => current.map((schedule) => (
         schedule.id === selected.id ? { ...schedule, payload: previousPayload } : schedule
       )));
       setError(caught instanceof Error ? caught.message : "参加者を変更できませんでした。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function undoLastPlayerChange() {
+    if (!selected || !editHistory.length || saving) return;
+    const previousPayload = editHistory.at(-1);
+    if (!previousPayload) return;
+    const currentPayload = selected.payload;
+
+    setSaving(true);
+    setError("");
+    setStatus("");
+    try {
+      const response = await fetch(`/api/admin/schedules/${encodeURIComponent(selected.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: previousPayload })
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "変更を元に戻せませんでした。");
+
+      setSchedules((current) => current.map((schedule) => (
+        schedule.id === selected.id ? { ...schedule, payload: previousPayload } : schedule
+      )));
+      setEditHistory((current) => current.slice(0, -1));
+      setStatus("直前のメンバー変更を元に戻し、共有先へ反映しました。");
+    } catch (caught) {
+      setSchedules((current) => current.map((schedule) => (
+        schedule.id === selected.id ? { ...schedule, payload: currentPayload } : schedule
+      )));
+      setError(caught instanceof Error ? caught.message : "変更を元に戻せませんでした。");
     } finally {
       setSaving(false);
     }
@@ -538,6 +577,14 @@ export default function AdminPage() {
             </button>
             <button className="share admin-share-button" type="button" onClick={() => void openHistoryShareModal()}>
               共有リンク・QR
+            </button>
+            <button
+              className="secondary admin-undo-button"
+              type="button"
+              onClick={() => void undoLastPlayerChange()}
+              disabled={saving || editHistory.length === 0}
+            >
+              {editHistory.length ? `選手変更を元に戻す（残り${editHistory.length}回）` : "元に戻せる変更はありません"}
             </button>
             <a className="share admin-action-link" href={`/s/${selected.id}`} target="_blank" rel="noreferrer">
               共有画面を開く
