@@ -1340,8 +1340,10 @@ export default function Home() {
         ) : null}
         {forcedPlayerNames.length ? (
           <div className="notice constraint-notice" role="status">
-            この条件では、{forcedPlayerNames.join("・")}は毎試合出場する必要があります。
-            固定ペアを守るため、出場回数を完全に平等にはできません。
+            <strong>出場回数に差が出ます。</strong><br />
+            固定ペアを崩さずに{constraintAnalysis.activeCourts}コート分（{constraintAnalysis.activeCourts * 4}人）の
+            出場枠を埋めるには、{forcedPlayerNames.join("・")}の出場が毎試合必要です。
+            そのため、この参加者はほかの参加者より出場回数が多くなります。
           </div>
         ) : null}
       </section>
