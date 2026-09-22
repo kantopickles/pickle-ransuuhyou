@@ -9,12 +9,9 @@ export type CommunityEvent = {
 
 export const COMMUNITY_LINKS = {
   instagram: "https://www.instagram.com/kantopickles_ricchan/",
-  line: "https://line.me/R/ti/p/@222chbus"
+  line: "https://line.me/R/ti/p/@222chbus",
+  tennisBear: "https://www.tennisbear.net/user/303162/organized-event"
 } as const;
-
-// 共有画面に掲載する練習会情報です。上から最大10件まで表示されます。
-// 内容を変更すると、すべての共有リンクに同じ情報が反映されます。
-export const COMMUNITY_PRACTICE_EVENTS: CommunityEvent[] = [];
 
 // 共有画面に掲載する大会情報です。上から最大10件まで表示されます。
 export const COMMUNITY_TOURNAMENT_EVENTS: CommunityEvent[] = [
