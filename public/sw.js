@@ -1,4 +1,4 @@
-const CACHE_VERSION = "pickleball-pwa-v1";
+const CACHE_VERSION = "pickleball-pwa-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const APP_SHELL = [

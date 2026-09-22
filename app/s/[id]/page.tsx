@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import ScheduleImageButton from "../../components/ScheduleImageButton";
+import ShareCommunityPanel from "../../components/ShareCommunityPanel";
 
 type Team = [number, number];
 
@@ -261,6 +262,8 @@ export default function ShortSharePage() {
         <h1>{payload?.title || "乱数表"}</h1>
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
+
+      <ShareCommunityPanel />
 
       {!payload && !error ? <div className="section loading" role="status">乱数表を読み込んでいます...</div> : null}
       {error ? <div className="error" role="alert">{error}</div> : null}
