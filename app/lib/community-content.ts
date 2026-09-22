@@ -9,7 +9,7 @@ export type CommunityEvent = {
 
 export const COMMUNITY_LINKS = {
   instagram: "https://www.instagram.com/kantopickles_ricchan/",
-  line: ""
+  line: "https://line.me/R/ti/p/@222chbus"
 } as const;
 
 // 共有画面に掲載する大会・練習会情報です。上から最大10件まで表示されます。
@@ -64,4 +64,3 @@ export const COMMUNITY_EVENTS: CommunityEvent[] = [
     url: "https://pikura.app/events"
   }
 ].slice(0, 10);
-
