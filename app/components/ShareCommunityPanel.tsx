@@ -157,7 +157,7 @@ export default function ShareCommunityPanel() {
                   aria-label={`${categoryLabel}一覧`}
                 >
                   {events.map((event) => (
-                    <article className="community-event-card" key={`${event.date}-${event.title}`}>
+                    <article className="community-event-card" key={event.url}>
                       <div className="community-event-date" aria-label={`${event.date} ${event.day}曜日`}>
                         <strong>{event.date}</strong>
                         <span>{event.day}</span>
