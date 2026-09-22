@@ -48,14 +48,6 @@ export const COMMUNITY_TOURNAMENT_EVENTS: CommunityEvent[] = [
     url: "https://pikura.app/events/manual-pb1cup-final-2026"
   },
   {
-    date: "11/21",
-    day: "土",
-    title: "PJ TOP TOUR 2026 T8 OARAI",
-    location: "茨城県大洗町",
-    status: "開催予定",
-    url: "https://pikura.app/events"
-  },
-  {
     date: "12/7",
     day: "月",
     title: "第3回 ピックルボールチャンピオンシップス in Japan",
