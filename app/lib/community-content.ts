@@ -12,9 +12,12 @@ export const COMMUNITY_LINKS = {
   line: "https://line.me/R/ti/p/@222chbus"
 } as const;
 
-// 共有画面に掲載する大会・練習会情報です。上から最大10件まで表示されます。
+// 共有画面に掲載する練習会情報です。上から最大10件まで表示されます。
 // 内容を変更すると、すべての共有リンクに同じ情報が反映されます。
-export const COMMUNITY_EVENTS: CommunityEvent[] = [
+export const COMMUNITY_PRACTICE_EVENTS: CommunityEvent[] = [];
+
+// 共有画面に掲載する大会情報です。上から最大10件まで表示されます。
+export const COMMUNITY_TOURNAMENT_EVENTS: CommunityEvent[] = [
   {
     date: "10/3",
     day: "土",

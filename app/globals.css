@@ -535,6 +535,39 @@ button:disabled {
   margin: 0;
 }
 
+.community-event-tabs {
+  background: #dcefe8;
+  border: 1px solid #bddbd1;
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
+}
+
+.community-event-tabs button {
+  background: transparent;
+  border-radius: 6px;
+  color: #36544c;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 900;
+  min-height: 42px;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.community-event-tabs button[aria-selected="true"] {
+  background: var(--brand-dark);
+  color: #ffffff;
+}
+
+.community-event-tabs button:focus-visible {
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18);
+  outline: 2px solid #ffffff;
+  outline-offset: -4px;
+}
+
 .community-events-heading a {
   color: var(--brand-dark);
   flex: 0 0 auto;
@@ -693,6 +726,42 @@ button:disabled {
   font-weight: 900;
   min-width: 48px;
   text-align: center;
+}
+
+.community-event-empty {
+  background: #ffffff;
+  border: 1px solid #cde2db;
+  border-radius: 8px;
+  margin: 2px 14px 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.community-event-empty strong {
+  color: #123d37;
+  display: block;
+  font-size: 18px;
+}
+
+.community-event-empty p {
+  color: #52635d;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 6px 0 12px;
+}
+
+.community-event-empty a {
+  align-items: center;
+  background: var(--brand);
+  border-radius: 8px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 900;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 16px;
+  text-decoration: none;
 }
 
 .image-save-error {
@@ -1336,6 +1405,21 @@ button:disabled {
   .community-event-list {
     padding-left: 12px;
     padding-right: 12px;
+  }
+
+  .community-events-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .community-events-heading > a {
+    align-self: flex-end;
+  }
+
+  .community-event-empty {
+    margin-left: 12px;
+    margin-right: 12px;
   }
 
   .modal-backdrop {
