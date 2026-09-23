@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  addEstimatedParticipantCounts,
   normalizeTennisBearEvents,
-  normalizeTennisBearTournamentEvents
+  normalizeTennisBearTournamentEvents,
+  readTennisBearCapacity
 } from "../app/lib/tennisbear-events.ts";
 
 test("テニスベアの予定を共有画面用に変換する", () => {
@@ -72,4 +74,37 @@ test("大会一覧ではTOURNAMENTだけを抽出して通常練習会を除外�
   assert.equal(events[0].title, "関東Pickle's杯");
   assert.equal(events[0].status, "満員");
   assert.equal(events[0].url, "https://www.tennisbear.net/pickleball/event/2/info");
+});
+
+test("詳細ページから人・ペア・チームの実定員を読み取る", () => {
+  assert.deepEqual(readTennisBearCapacity("<div>定員：7人</div>"), { maximum: 7, unit: "人" });
+  assert.deepEqual(readTennisBearCapacity("<div>募集ペア数：10組</div>"), { maximum: 10, unit: "ペア" });
+  assert.deepEqual(readTennisBearCapacity("<div>募集チーム数：12</div>"), { maximum: 12, unit: "チーム" });
+});
+
+test("人数非公開の募集中イベントだけ半数または半数+1で補完する", async () => {
+  const events = await addEstimatedParticipantCounts(
+    [
+      {
+        date: "9/26",
+        day: "土",
+        title: "人数非公開",
+        location: "体育館",
+        status: "募集中",
+        url: "https://www.tennisbear.net/pickleball/event/101/info"
+      },
+      {
+        date: "10/25",
+        day: "日",
+        title: "公式人数あり",
+        location: "体育館",
+        status: "募集中 8ペア/10ペア",
+        url: "https://www.tennisbear.net/pickleball/event/102/info"
+      }
+    ],
+    async () => new Response("<div>定員：12人</div>")
+  );
+
+  assert.equal(events[0].status, "募集中 7人/12人");
+  assert.equal(events[1].status, "募集中 8ペア/10ペア");
 });

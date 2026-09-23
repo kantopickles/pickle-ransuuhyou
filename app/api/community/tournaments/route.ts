@@ -1,4 +1,7 @@
-import { normalizeTennisBearTournamentEvents } from "../../../lib/tennisbear-events";
+import {
+  addEstimatedParticipantCounts,
+  normalizeTennisBearTournamentEvents
+} from "../../../lib/tennisbear-events";
 
 const TENNIS_BEAR_API =
   "https://www.tennisbear.net/api/v3/users/36614/detail-page/organized-events/future?limitFlg=false&name=";
@@ -11,7 +14,7 @@ export async function GET() {
     });
     if (!response.ok) throw new Error(`TennisBear returned ${response.status}`);
 
-    const events = normalizeTennisBearTournamentEvents(await response.json());
+    const events = await addEstimatedParticipantCounts(normalizeTennisBearTournamentEvents(await response.json()));
     return Response.json(
       { events },
       {
