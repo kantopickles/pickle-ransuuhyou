@@ -2,6 +2,7 @@ import type { CommunityEvent } from "./community-content";
 
 type TennisBearEvent = {
   id?: unknown;
+  eventType?: unknown;
   eventTitle?: unknown;
   datetimeForDisplay?: unknown;
   dateForDisplay?: unknown;
@@ -30,12 +31,13 @@ function readStatus(event: TennisBearEvent) {
   return participants ? `募集中 ${participants}` : "募集中";
 }
 
-export function normalizeTennisBearEvents(value: unknown): CommunityEvent[] {
+function normalizeEvents(value: unknown, include: (event: TennisBearEvent) => boolean): CommunityEvent[] {
   if (!Array.isArray(value)) return [];
 
   return value
     .filter((event): event is TennisBearEvent => Boolean(event) && typeof event === "object")
     .filter((event) => event.pickleballFlg === true && event.callOff !== true)
+    .filter(include)
     .filter((event) => typeof event.id === "number" && typeof event.eventTitle === "string")
     .filter((event) => typeof event.dateForDisplay === "string" && typeof event.startDatetimeString === "string")
     .sort((left, right) => String(left.startDatetimeString).localeCompare(String(right.startDatetimeString)))
@@ -57,4 +59,12 @@ export function normalizeTennisBearEvents(value: unknown): CommunityEvent[] {
         url: `https://www.tennisbear.net/pickleball/event/${event.id}/info`
       };
     });
+}
+
+export function normalizeTennisBearEvents(value: unknown): CommunityEvent[] {
+  return normalizeEvents(value, () => true);
+}
+
+export function normalizeTennisBearTournamentEvents(value: unknown): CommunityEvent[] {
+  return normalizeEvents(value, (event) => event.eventType === "TOURNAMENT");
 }

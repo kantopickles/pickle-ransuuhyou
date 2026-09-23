@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   COMMUNITY_LINKS,
-  COMMUNITY_TOURNAMENT_EVENTS,
   type CommunityEvent
 } from "../lib/community-content";
 
@@ -15,7 +14,10 @@ export default function ShareCommunityPanel() {
   const [eventCategory, setEventCategory] = useState<EventCategory>("practice");
   const [practiceEvents, setPracticeEvents] = useState<CommunityEvent[]>([]);
   const [practiceLoading, setPracticeLoading] = useState(true);
-  const events = eventCategory === "practice" ? practiceEvents : COMMUNITY_TOURNAMENT_EVENTS;
+  const [tournamentEvents, setTournamentEvents] = useState<CommunityEvent[]>([]);
+  const [tournamentLoading, setTournamentLoading] = useState(true);
+  const events = eventCategory === "practice" ? practiceEvents : tournamentEvents;
+  const eventsLoading = eventCategory === "practice" ? practiceLoading : tournamentLoading;
   const categoryLabel = eventCategory === "practice" ? "練習会情報" : "大会情報";
 
   useEffect(() => {
@@ -35,6 +37,21 @@ export default function ShareCommunityPanel() {
       })
       .finally(() => {
         if (active) setPracticeLoading(false);
+      });
+
+    fetch("/api/community/tournaments", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("大会情報を取得できませんでした。");
+        return response.json() as Promise<{ events?: CommunityEvent[] }>;
+      })
+      .then((data) => {
+        if (active) setTournamentEvents(Array.isArray(data.events) ? data.events.slice(0, 10) : []);
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) setTournamentEvents([]);
+      })
+      .finally(() => {
+        if (active) setTournamentLoading(false);
       });
 
     return () => {
@@ -134,18 +151,20 @@ export default function ShareCommunityPanel() {
               </button>
             </div>
             <a
-              href={eventCategory === "practice" ? COMMUNITY_LINKS.tennisBear : "https://pikura.app/events"}
+              href={eventCategory === "practice"
+                ? COMMUNITY_LINKS.practiceTennisBear
+                : COMMUNITY_LINKS.tournamentTennisBear}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {eventCategory === "practice" ? "テニスベアで見る" : "すべて見る"} <span aria-hidden="true">›</span>
+              テニスベアで見る <span aria-hidden="true">›</span>
             </a>
           </div>
 
           <div id="community-event-panel" role="tabpanel" aria-label={categoryLabel}>
-            {eventCategory === "practice" && practiceLoading ? (
+            {eventsLoading ? (
               <div className="community-event-empty" aria-live="polite">
-                <strong>練習会情報を読み込み中</strong>
+                <strong>{categoryLabel}を読み込み中</strong>
                 <p>最新の開催予定を確認しています。</p>
               </div>
             ) : events.length ? (
@@ -198,9 +217,15 @@ export default function ShareCommunityPanel() {
               </>
             ) : (
               <div className="community-event-empty">
-                <strong>練習会の最新情報</strong>
-                <p>現在予定を取得できません。テニスベアでご確認ください。</p>
-                <a href={COMMUNITY_LINKS.tennisBear} target="_blank" rel="noopener noreferrer">
+                <strong>{categoryLabel}の最新情報</strong>
+                <p>現在、情報を取得できません。テニスベアでご確認ください。</p>
+                <a
+                  href={eventCategory === "practice"
+                    ? COMMUNITY_LINKS.practiceTennisBear
+                    : COMMUNITY_LINKS.tournamentTennisBear}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   テニスベアで確認 <span aria-hidden="true">›</span>
                 </a>
               </div>
