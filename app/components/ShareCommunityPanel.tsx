@@ -3,22 +3,29 @@
 import { useEffect, useRef, useState } from "react";
 import {
   COMMUNITY_LINKS,
+  getPracticeLevels,
   type CommunityEvent
 } from "../lib/community-content";
 
-type EventCategory = "practice" | "tournament";
+type EventCategory = "beginner" | "intermediate" | "tournament";
 
 export default function ShareCommunityPanel() {
   const eventListRef = useRef<HTMLDivElement>(null);
   const [currentEvent, setCurrentEvent] = useState(0);
-  const [eventCategory, setEventCategory] = useState<EventCategory>("practice");
+  const [eventCategory, setEventCategory] = useState<EventCategory>("beginner");
   const [practiceEvents, setPracticeEvents] = useState<CommunityEvent[]>([]);
   const [practiceLoading, setPracticeLoading] = useState(true);
   const [tournamentEvents, setTournamentEvents] = useState<CommunityEvent[]>([]);
   const [tournamentLoading, setTournamentLoading] = useState(true);
-  const events = eventCategory === "practice" ? practiceEvents : tournamentEvents;
-  const eventsLoading = eventCategory === "practice" ? practiceLoading : tournamentLoading;
-  const categoryLabel = eventCategory === "practice" ? "練習会情報" : "大会情報";
+  const events = eventCategory === "tournament"
+    ? tournamentEvents
+    : practiceEvents.filter((event) => getPracticeLevels(event.title).includes(eventCategory)).slice(0, 10);
+  const eventsLoading = eventCategory === "tournament" ? tournamentLoading : practiceLoading;
+  const categoryLabel = eventCategory === "beginner"
+    ? "初級の練習会情報"
+    : eventCategory === "intermediate"
+      ? "中級の練習会情報"
+      : "大会情報";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -134,11 +141,20 @@ export default function ShareCommunityPanel() {
               <button
                 type="button"
                 role="tab"
-                aria-selected={eventCategory === "practice"}
+                aria-selected={eventCategory === "beginner"}
                 aria-controls="community-event-panel"
-                onClick={() => selectCategory("practice")}
+                onClick={() => selectCategory("beginner")}
               >
-                練習会情報
+                初級
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={eventCategory === "intermediate"}
+                aria-controls="community-event-panel"
+                onClick={() => selectCategory("intermediate")}
+              >
+                中級
               </button>
               <button
                 type="button"
@@ -151,9 +167,9 @@ export default function ShareCommunityPanel() {
               </button>
             </div>
             <a
-              href={eventCategory === "practice"
-                ? COMMUNITY_LINKS.practiceTennisBear
-                : COMMUNITY_LINKS.tournamentTennisBear}
+              href={eventCategory === "tournament"
+                ? COMMUNITY_LINKS.tournamentTennisBear
+                : COMMUNITY_LINKS.practiceTennisBear}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -220,9 +236,9 @@ export default function ShareCommunityPanel() {
                 <strong>{categoryLabel}の最新情報</strong>
                 <p>現在、情報を取得できません。テニスベアでご確認ください。</p>
                 <a
-                  href={eventCategory === "practice"
-                    ? COMMUNITY_LINKS.practiceTennisBear
-                    : COMMUNITY_LINKS.tournamentTennisBear}
+                  href={eventCategory === "tournament"
+                    ? COMMUNITY_LINKS.tournamentTennisBear
+                    : COMMUNITY_LINKS.practiceTennisBear}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
