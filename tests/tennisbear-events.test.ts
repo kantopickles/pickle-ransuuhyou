@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   addEstimatedParticipantCounts,
+  normalizeCombinedTennisBearTournamentEvents,
   normalizeTennisBearEvents,
+  normalizeTennisBearPracticeEvents,
   normalizeTennisBearTournamentEvents,
   readTennisBearCapacity
 } from "../app/lib/tennisbear-events.ts";
@@ -74,6 +76,45 @@ test("大会一覧ではTOURNAMENTだけを抽出して通常練習会を除外�
   assert.equal(events[0].title, "関東Pickle's杯");
   assert.equal(events[0].status, "満員");
   assert.equal(events[0].url, "https://www.tennisbear.net/pickleball/event/2/info");
+});
+
+test("練習会は大会を除外し、初級・中級それぞれの後続予定まで選ぶ", () => {
+  const event = (id: number, eventType: string, eventTitle: string) => ({
+    id, eventType, eventTitle,
+    datetimeForDisplay: "10/3(土) 9:00-12:00",
+    dateForDisplay: "10/3(土)",
+    startDatetimeString: `2026-10-03T${String(id).padStart(2, "0")}:00:00.000+09:00`,
+    place: { name: "体育館" },
+    pickleballFlg: true
+  });
+  const source = [
+    ...Array.from({ length: 10 }, (_, index) => event(index, "NORMAL", `初級練習会${index}`)),
+    event(10, "TOURNAMENT", "大会"),
+    event(11, "NORMAL", "中級練習会"),
+    event(12, "NORMAL", "レベル指定なし練習会")
+  ];
+
+  const events = normalizeTennisBearPracticeEvents(source);
+  assert.equal(events.length, 12);
+  assert.ok(events.some((item) => item.title === "中級練習会"));
+  assert.ok(events.some((item) => item.title === "レベル指定なし練習会"));
+  assert.ok(!events.some((item) => item.title === "大会"));
+});
+
+test("2つの主催者ページの大会を日時順に統合し、同じIDを重複表示しない", () => {
+  const event = (id: number, eventType: string, day: string) => ({
+    id, eventType, eventTitle: `大会${id}`,
+    datetimeForDisplay: `10/${day}(土) 9:00-12:00`,
+    dateForDisplay: `10/${day}(土)`,
+    startDatetimeString: `2026-10-${day}T09:00:00.000+09:00`,
+    place: { name: "体育館" },
+    pickleballFlg: true
+  });
+  const events = normalizeCombinedTennisBearTournamentEvents([
+    [event(1, "TOURNAMENT", "20"), event(3, "NORMAL", "21")],
+    [event(2, "TOURNAMENT", "10"), event(1, "TOURNAMENT", "20")]
+  ]);
+  assert.deepEqual(events.map((item) => item.title), ["大会2", "大会1"]);
 });
 
 test("詳細ページから人・ペア・チームの実定員を読み取る", () => {

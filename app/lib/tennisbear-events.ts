@@ -1,4 +1,4 @@
-import type { CommunityEvent } from "./community-content";
+import { getPracticeLevels, type CommunityEvent } from "./community-content.ts";
 
 type TennisBearEvent = {
   id?: unknown;
@@ -31,7 +31,11 @@ function readStatus(event: TennisBearEvent) {
   return participants ? `募集中 ${participants}` : "募集中";
 }
 
-function normalizeEvents(value: unknown, include: (event: TennisBearEvent) => boolean): CommunityEvent[] {
+function normalizeEvents(
+  value: unknown,
+  include: (event: TennisBearEvent) => boolean,
+  limit = 10
+): CommunityEvent[] {
   if (!Array.isArray(value)) return [];
 
   return value
@@ -41,7 +45,7 @@ function normalizeEvents(value: unknown, include: (event: TennisBearEvent) => bo
     .filter((event) => typeof event.id === "number" && typeof event.eventTitle === "string")
     .filter((event) => typeof event.dateForDisplay === "string" && typeof event.startDatetimeString === "string")
     .sort((left, right) => String(left.startDatetimeString).localeCompare(String(right.startDatetimeString)))
-    .slice(0, 10)
+    .slice(0, limit)
     .map((event) => {
       const { date, day } = readDate(String(event.dateForDisplay));
       const dateLabel = String(event.dateForDisplay);
@@ -65,8 +69,29 @@ export function normalizeTennisBearEvents(value: unknown): CommunityEvent[] {
   return normalizeEvents(value, () => true);
 }
 
+export function normalizeTennisBearPracticeEvents(value: unknown): CommunityEvent[] {
+  const practiceEvents = normalizeEvents(value, (event) => event.eventType === "NORMAL", Number.POSITIVE_INFINITY);
+  const beginner = practiceEvents.filter((event) => getPracticeLevels(event.title).includes("beginner")).slice(0, 10);
+  const intermediate = practiceEvents.filter((event) => getPracticeLevels(event.title).includes("intermediate")).slice(0, 10);
+  const selectedUrls = new Set([...beginner, ...intermediate].map((event) => event.url));
+  return practiceEvents.filter((event) => selectedUrls.has(event.url));
+}
+
 export function normalizeTennisBearTournamentEvents(value: unknown): CommunityEvent[] {
   return normalizeEvents(value, (event) => event.eventType === "TOURNAMENT");
+}
+
+export function normalizeCombinedTennisBearTournamentEvents(sources: unknown[]): CommunityEvent[] {
+  const uniqueEvents = new Map<number, TennisBearEvent>();
+  for (const source of sources) {
+    if (!Array.isArray(source)) continue;
+    for (const event of source) {
+      if (event && typeof event === "object" && typeof event.id === "number") {
+        uniqueEvents.set(event.id, event);
+      }
+    }
+  }
+  return normalizeTennisBearTournamentEvents([...uniqueEvents.values()]);
 }
 
 type EventCapacity = {

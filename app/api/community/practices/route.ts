@@ -1,6 +1,6 @@
 import {
   addEstimatedParticipantCounts,
-  normalizeTennisBearEvents
+  normalizeTennisBearPracticeEvents
 } from "../../../lib/tennisbear-events";
 
 const TENNIS_BEAR_API =
@@ -14,7 +14,7 @@ export async function GET() {
     });
     if (!response.ok) throw new Error(`TennisBear returned ${response.status}`);
 
-    const events = await addEstimatedParticipantCounts(normalizeTennisBearEvents(await response.json()));
+    const events = await addEstimatedParticipantCounts(normalizeTennisBearPracticeEvents(await response.json()));
     return Response.json(
       { events },
       {

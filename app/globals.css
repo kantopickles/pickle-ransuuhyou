@@ -579,6 +579,14 @@ button:disabled {
   text-underline-offset: 3px;
 }
 
+.community-source-links {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: flex-end;
+}
+
 .community-event-list {
   display: flex;
   gap: 10px;
@@ -1413,7 +1421,7 @@ button:disabled {
     gap: 4px;
   }
 
-  .community-events-heading > a {
+  .community-source-links {
     align-self: flex-end;
   }
 

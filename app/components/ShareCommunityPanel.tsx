@@ -37,7 +37,7 @@ export default function ShareCommunityPanel() {
         return response.json() as Promise<{ events?: CommunityEvent[] }>;
       })
       .then((data) => {
-        if (active) setPracticeEvents(Array.isArray(data.events) ? data.events.slice(0, 10) : []);
+        if (active) setPracticeEvents(Array.isArray(data.events) ? data.events : []);
       })
       .catch((error: unknown) => {
         if (active && !(error instanceof DOMException && error.name === "AbortError")) setPracticeEvents([]);
@@ -166,15 +166,16 @@ export default function ShareCommunityPanel() {
                 大会情報
               </button>
             </div>
-            <a
-              href={eventCategory === "tournament"
-                ? COMMUNITY_LINKS.tournamentTennisBear
-                : COMMUNITY_LINKS.practiceTennisBear}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              テニスベアで見る <span aria-hidden="true">›</span>
-            </a>
+            <div className="community-source-links">
+              <a href={COMMUNITY_LINKS.practiceTennisBear} target="_blank" rel="noopener noreferrer">
+                {eventCategory === "tournament" ? "りっちゃん" : "テニスベアで見る"} <span aria-hidden="true">›</span>
+              </a>
+              {eventCategory === "tournament" && (
+                <a href={COMMUNITY_LINKS.tournamentTennisBear} target="_blank" rel="noopener noreferrer">
+                  関東ピックルズ <span aria-hidden="true">›</span>
+                </a>
+              )}
+            </div>
           </div>
 
           <div id="community-event-panel" role="tabpanel" aria-label={categoryLabel}>

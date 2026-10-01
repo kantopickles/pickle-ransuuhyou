@@ -1,26 +1,32 @@
 import {
   addEstimatedParticipantCounts,
-  normalizeTennisBearTournamentEvents
+  normalizeCombinedTennisBearTournamentEvents
 } from "../../../lib/tennisbear-events";
 
-const TENNIS_BEAR_API =
-  "https://www.tennisbear.net/api/v3/users/36614/detail-page/organized-events/future?limitFlg=false&name=";
+const TENNIS_BEAR_APIS = [303162, 36614].map((userId) =>
+  `https://www.tennisbear.net/api/v3/users/${userId}/detail-page/organized-events/future?limitFlg=false&name=`
+);
 
 export async function GET() {
   try {
-    const response = await fetch(TENNIS_BEAR_API, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(8_000)
-    });
-    if (!response.ok) throw new Error(`TennisBear returned ${response.status}`);
+    const results = await Promise.allSettled(TENNIS_BEAR_APIS.map(async (url) => {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (!response.ok) throw new Error(`TennisBear returned ${response.status}`);
+      return response.json() as Promise<unknown>;
+    }));
+    const sources = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (sources.length === 0) throw new Error("TennisBear tournament sources unavailable");
 
-    const events = await addEstimatedParticipantCounts(normalizeTennisBearTournamentEvents(await response.json()));
+    const events = await addEstimatedParticipantCounts(normalizeCombinedTennisBearTournamentEvents(sources));
     return Response.json(
       { events },
       {
         headers: {
-          "Cache-Control": "public, max-age=300",
-          "CDN-Cache-Control": "public, max-age=900, stale-while-revalidate=3600"
+          "Cache-Control": `public, max-age=${sources.length === TENNIS_BEAR_APIS.length ? 300 : 60}`,
+          "CDN-Cache-Control": `public, max-age=${sources.length === TENNIS_BEAR_APIS.length ? 900 : 60}, stale-while-revalidate=3600`
         }
       }
     );
