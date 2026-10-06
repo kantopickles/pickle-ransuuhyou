@@ -315,11 +315,31 @@ button {
 .attendance-option {
   align-items: center;
   border-bottom: 1px solid var(--line);
-  cursor: pointer;
-  display: flex;
+  display: grid;
   gap: 12px;
   min-height: 56px;
   padding: 10px 4px;
+}
+
+.attendance-selected {
+  grid-template-columns: minmax(0, 1fr) 132px;
+}
+
+.attendance-target {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  min-height: 36px;
+  min-width: 0;
+}
+
+.attendance-court {
+  min-width: 0;
+}
+
+.attendance-court .select {
+  font-size: 16px;
 }
 
 .attendance-option input {
@@ -330,7 +350,7 @@ button {
   width: 24px;
 }
 
-.attendance-option > span {
+.attendance-target > span {
   min-width: 0;
 }
 

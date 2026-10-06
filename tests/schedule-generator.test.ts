@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   analyzeScheduleConstraints,
   generateSchedule,
+  type AlwaysPlayingCourts,
   type GeneratedSchedule,
   type PairSetting
 } from "../app/lib/schedule-generator.ts";
@@ -224,4 +225,65 @@ test("休みなしによって別の参加者も必須になる場合を検出�
   assert.equal(analysis.possible, true);
   assert.deepEqual(analysis.alwaysPlayingPlayers, [6]);
   assert.deepEqual(analysis.forcedPlayers, [7]);
+});
+
+test("休みなしの個人・固定ペアを、毎試合それぞれの指定コートへ配置する", () => {
+  const cases: { count: number; courts: number; pairs: PairSetting[]; selected: number[]; assignments: AlwaysPlayingCourts }[] = [
+    { count: 12, courts: 2, pairs: [], selected: [0, 1], assignments: { 0: 1, 1: 2 } },
+    { count: 12, courts: 2, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [1, 2], assignments: { 1: 2, 2: 1 } },
+    { count: 12, courts: 2, pairs: [], selected: [0, 1, 2, 3], assignments: { 0: 2, 1: 2, 2: 2, 3: 2 } },
+    { count: 20, courts: 3, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [0, 2, 3], assignments: { 0: 1, 2: 1, 3: 3 } },
+    { count: 20, courts: 5, pairs: [], selected: Array.from({ length: 20 }, (_, index) => index),
+      assignments: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [index, Math.floor(index / 4) + 1])) }
+  ];
+
+  for (const scenario of cases) {
+    for (let seed = 1; seed <= 5; seed += 1) {
+      const analysis = analyzeScheduleConstraints(scenario.count, scenario.courts, scenario.pairs, scenario.selected, scenario.assignments);
+      assert.equal(analysis.possible, true);
+      const schedule = generateSchedule(scenario.count, scenario.courts, 20, scenario.pairs,
+        undefined, undefined, seededRandom(seed), scenario.selected, scenario.assignments);
+      assertScheduleIntegrity(schedule, scenario.count, scenario.courts, scenario.pairs);
+      for (const match of schedule.matches) {
+        for (const player of analysis.alwaysPlayingPlayers) assert.ok(!match.resting.includes(player));
+        for (const [player, court] of Object.entries(analysis.alwaysPlayingCourts)) {
+          const assigned = match.courts.find((candidate) => candidate.court === court);
+          assert.ok(assigned && [...assigned.teamA, ...assigned.teamB].includes(Number(player)),
+            `${scenario.count}人・seed ${seed}: ${Number(player) + 1}番がコート${court}にいない`);
+        }
+      }
+      if (scenario.pairs.length) assert.equal(analysis.alwaysPlayingCourts[0], analysis.alwaysPlayingCourts[1]);
+    }
+  }
+});
+
+test("指定コートの人数超過・ペアの矛盾・存在しないコートを理由付きで拒否する", () => {
+  const overcrowded = analyzeScheduleConstraints(12, 2, [], [0, 1, 2, 3, 4], { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1 });
+  assert.equal(overcrowded.possible, false);
+  assert.match(overcrowded.error ?? "", /コート1.*5人.*出場枠は4人/);
+
+  const conflict = analyzeScheduleConstraints(8, 2, [{ id: "pair", a: 0, b: 1 }], [0], { 0: 1, 1: 2 });
+  assert.equal(conflict.possible, false);
+  assert.match(conflict.error ?? "", /固定ペア.*異なるコート/);
+
+  const unavailable = analyzeScheduleConstraints(8, 5, [], [0], { 0: 3 });
+  assert.equal(unavailable.possible, false);
+  assert.match(unavailable.error ?? "", /コート3.*コート1〜2/);
+  assert.throws(() => generateSchedule(8, 5, 20, [], undefined, undefined, seededRandom(1), [0], { 0: 3 }), /コート3/);
+});
+
+test("指定コートの奇数枠を固定ペアだけで埋められない条件を検出する", () => {
+  const pairs: PairSetting[] = [
+    { id: "first", a: 0, b: 1 }, { id: "second", a: 2, b: 3 }, { id: "third", a: 4, b: 5 }
+  ];
+  const impossible = analyzeScheduleConstraints(8, 2, pairs, [6, 7], { 6: 1, 7: 2 });
+  assert.equal(impossible.possible, false);
+  assert.match(impossible.error ?? "", /指定コートの残り枠.*固定ペア/);
+  assert.throws(() => generateSchedule(8, 2, 20, pairs, undefined, undefined, seededRandom(1), [6, 7], { 6: 1, 7: 2 }), /指定コートの残り枠/);
+
+  // 片方の個人をコート指定なしにすると、同じコートへ入れて奇数枠を埋められます。
+  assert.equal(analyzeScheduleConstraints(8, 2, pairs, [6, 7], { 6: 1 }).possible, true);
+  const schedule = generateSchedule(8, 2, 20, pairs, undefined, undefined, seededRandom(1), [6, 7], { 6: 1 });
+  assertScheduleIntegrity(schedule, 8, 2, pairs);
+  assert.ok(schedule.matches.every((match) => [...match.courts[0].teamA, ...match.courts[0].teamB].includes(7)));
 });

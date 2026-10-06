@@ -9,6 +9,7 @@ import {
   createStats,
   generateSchedule,
   getParticipantUnits,
+  type AlwaysPlayingCourts,
   type GeneratedSchedule,
   type MatchPlan,
   type PairSetting,
@@ -96,7 +97,8 @@ function buildContinuationSchedule(
   requestedCourtCount: number,
   requestedMatchCount: number,
   pairs: PairSetting[],
-  alwaysPlayingPlayers: number[]
+  alwaysPlayingPlayers: number[],
+  alwaysPlayingCourts: AlwaysPlayingCourts
 ) {
   const completedMatches = context.originalMatches
     .filter((match) => context.checkedMatches.includes(match.match))
@@ -177,7 +179,8 @@ function buildContinuationSchedule(
     initialStats,
     initiallyRested,
     undefined,
-    alwaysPlayingPlayers
+    alwaysPlayingPlayers,
+    alwaysPlayingCourts
   );
   const preservedMatches = completedMatches.map((match, index) => ({
     ...match,
@@ -260,6 +263,7 @@ export default function Home() {
   const [names, setNames] = useState<string[]>(() => createInitialNames(10));
   const [pairs, setPairs] = useState<PairSetting[]>([]);
   const [alwaysPlayingPlayers, setAlwaysPlayingPlayers] = useState<number[]>([]);
+  const [alwaysPlayingCourts, setAlwaysPlayingCourts] = useState<AlwaysPlayingCourts>({});
   const [schedule, setSchedule] = useState<GeneratedSchedule | null>(null);
   const [generatedMeta, setGeneratedMeta] = useState<GeneratedMeta | null>(null);
   const [scheduleDirty, setScheduleDirty] = useState(false);
@@ -317,6 +321,7 @@ export default function Home() {
           setNames(Array.from({ length: importedCount }, (_, index) => visibleNames[index] || `${index + 1}番`));
           setPairs([]);
           setAlwaysPlayingPlayers([]);
+          setAlwaysPlayingCourts({});
           setSchedule(null);
           setGeneratedMeta(null);
           setEditHistory([]);
@@ -363,6 +368,7 @@ export default function Home() {
         setNames(Array.from({ length: importedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
         setPairs([]);
         setAlwaysPlayingPlayers([]);
+        setAlwaysPlayingCourts({});
         if (parsed.continuation) {
           const context = parsed.continuation;
           const activeCourts = Math.max(1, ...context.originalMatches.map((match) => match.courts.length));
@@ -418,6 +424,7 @@ export default function Home() {
         names?: string[];
         pairs?: PairSetting[];
         alwaysPlayingPlayers?: number[];
+        alwaysPlayingCourts?: AlwaysPlayingCourts;
         schedule?: StoredSchedule | null;
         scheduleDirty?: boolean;
         shareEditToken?: string;
@@ -438,6 +445,9 @@ export default function Home() {
       setAlwaysPlayingPlayers(Array.isArray(parsed.alwaysPlayingPlayers)
         ? parsed.alwaysPlayingPlayers.filter((player) => Number.isInteger(player) && player >= 0 && player < savedCount)
         : []);
+      setAlwaysPlayingCourts(Object.fromEntries(Object.entries(parsed.alwaysPlayingCourts ?? {})
+        .filter(([player, court]) => Number.isInteger(Number(player)) && Number(player) >= 0 && Number(player) < savedCount
+          && Number.isInteger(court) && court >= 1 && court <= 5)));
       setCurrentShareId(parsed.shareId ?? "");
       setCurrentShareEditToken(parsed.shareEditToken ?? "");
       setContinuation(parsed.continuation ?? null);
@@ -475,6 +485,7 @@ export default function Home() {
         names,
         pairs,
         alwaysPlayingPlayers,
+        alwaysPlayingCourts,
         participantCount,
         schedule: schedule
           ? {
@@ -498,7 +509,7 @@ export default function Home() {
         }))
       })
     );
-  }, [participantCount, courtCount, matchCount, title, names, pairs, alwaysPlayingPlayers, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, editHistory, storageLoaded]);
+  }, [participantCount, courtCount, matchCount, title, names, pairs, alwaysPlayingPlayers, alwaysPlayingCourts, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, editHistory, storageLoaded]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -511,12 +522,18 @@ export default function Home() {
     : 0;
   const nextMatchNumber = schedule?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
   const constraintAnalysis = useMemo(
-    () => analyzeScheduleConstraints(participantCount, courtCount, pairs, alwaysPlayingPlayers),
-    [participantCount, courtCount, pairs, alwaysPlayingPlayers]
+    () => analyzeScheduleConstraints(participantCount, courtCount, pairs, alwaysPlayingPlayers, alwaysPlayingCourts),
+    [participantCount, courtCount, pairs, alwaysPlayingPlayers, alwaysPlayingCourts]
   );
   const forcedPlayerNames = constraintAnalysis.forcedPlayers.map((player) => displayNames[player]);
   const attendanceUnits = useMemo(() => getParticipantUnits(participantCount, pairs), [participantCount, pairs]);
   const alwaysPlayingNames = constraintAnalysis.alwaysPlayingPlayers.map((player) => displayNames[player]);
+  const attendanceSummary = attendanceUnits
+    .filter((members) => members.some((player) => constraintAnalysis.alwaysPlayingPlayers.includes(player)))
+    .map((members) => {
+      const court = attendanceCourtValue(members);
+      return `${members.map((player) => displayNames[player]).join("・")}${court && court !== "conflict" ? `（コート${court}）` : ""}`;
+    }).join("、");
 
   function markScheduleDirty() {
     if (schedule) {
@@ -538,6 +555,8 @@ export default function Home() {
     setParticipantCount(nextCount);
     setNames((current) => Array.from({ length: nextCount }, (_, index) => current[index] || `${index + 1}番`));
     setAlwaysPlayingPlayers((current) => current.filter((player) => player < nextCount));
+    setAlwaysPlayingCourts((current) => Object.fromEntries(Object.entries(current)
+      .filter(([player]) => Number(player) < nextCount)));
     setPairs((current) =>
       current.filter(
         (pair) =>
@@ -577,6 +596,9 @@ export default function Home() {
     setNames((current) => current.filter((_, nameIndex) => nameIndex !== index));
     setAlwaysPlayingPlayers((current) => current.filter((player) => player !== index)
       .map((player) => player > index ? player - 1 : player));
+    setAlwaysPlayingCourts((current) => Object.fromEntries(Object.entries(current)
+      .filter(([player]) => Number(player) !== index)
+      .map(([player, court]) => [Number(player) > index ? Number(player) - 1 : Number(player), court])));
     setPairs((current) => current.flatMap((pair) => {
       if (pair.a === index || pair.b === index) return [];
       return [{
@@ -614,9 +636,33 @@ export default function Home() {
 
   function toggleAlwaysPlayingUnit(members: number[], checked: boolean) {
     markScheduleDirty();
+    setError("");
     setAlwaysPlayingPlayers((current) => checked
       ? Array.from(new Set([...current, ...members]))
       : current.filter((player) => !members.includes(player)));
+    if (!checked) {
+      setAlwaysPlayingCourts((current) => Object.fromEntries(Object.entries(current)
+        .filter(([player]) => !members.includes(Number(player)))));
+    }
+  }
+
+  function attendanceCourtValue(members: number[]) {
+    const courts = [...new Set(members.map((player) => alwaysPlayingCourts[player])
+      .filter((court) => court !== undefined))];
+    return courts.length > 1 ? "conflict" : courts.length ? String(courts[0]) : "";
+  }
+
+  function updateAttendanceCourt(members: number[], value: string) {
+    markScheduleDirty();
+    setError("");
+    setAlwaysPlayingCourts((current) => {
+      const next = { ...current };
+      for (const player of members) {
+        if (value === "") delete next[player];
+        else next[player] = Number(value);
+      }
+      return next;
+    });
   }
 
   async function requestShareRecord(
@@ -692,7 +738,7 @@ export default function Home() {
     try {
       if (continuation) {
         const nextTitle = title.trim();
-        const continued = buildContinuationSchedule(continuation, displayNames, courtCount, matchCount, pairs, alwaysPlayingPlayers);
+        const continued = buildContinuationSchedule(continuation, displayNames, courtCount, matchCount, pairs, alwaysPlayingPlayers, alwaysPlayingCourts);
         const response = await fetch(`/api/admin/schedules/${encodeURIComponent(continuation.shareId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -738,7 +784,7 @@ export default function Home() {
         return;
       }
 
-      const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs, undefined, undefined, undefined, alwaysPlayingPlayers);
+      const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs, undefined, undefined, undefined, alwaysPlayingPlayers, alwaysPlayingCourts);
       const nextTitle = title.trim();
       setSchedule(nextSchedule);
       setEditHistory([]);
@@ -806,6 +852,7 @@ export default function Home() {
     setNames(createInitialNames(10));
     setPairs([]);
     setAlwaysPlayingPlayers([]);
+    setAlwaysPlayingCourts({});
     setSchedule(null);
     setGeneratedMeta(null);
     setScheduleDirty(false);
@@ -1375,7 +1422,7 @@ export default function Home() {
         {forcedPlayerNames.length ? (
           <div className="notice constraint-notice" role="status">
             <strong>出場回数に差が出ます。</strong><br />
-            {alwaysPlayingNames.length ? "休みなしの対象を出場させ、固定ペアを崩さずに" : "固定ペアを崩さずに"}
+            {alwaysPlayingNames.length ? "休みなしの対象と指定コートを守り、固定ペアを崩さずに" : "固定ペアを崩さずに"}
             {constraintAnalysis.activeCourts}コート分（{constraintAnalysis.activeCourts * 4}人）の
             出場枠を埋めるには、{forcedPlayerNames.join("・")}の出場が毎試合必要です。
             そのため、この参加者はほかの参加者より出場回数が多くなります。
@@ -1394,7 +1441,7 @@ export default function Home() {
           <span>
             <span className="section-title">全試合出場（休みなし）</span>
             <span className="section-note attendance-summary">
-              {alwaysPlayingNames.length ? `${alwaysPlayingNames.length}人：${alwaysPlayingNames.join("・")}` : "設定なし"}
+              {alwaysPlayingNames.length ? `${alwaysPlayingNames.length}人：${attendanceSummary}` : "設定なし"}
             </span>
           </span>
           <span className="chevron" aria-hidden="true">{attendanceOpen ? "▲" : "▼"}</span>
@@ -1402,19 +1449,47 @@ export default function Home() {
         {attendanceOpen ? (
           <div className="attendance-settings" id="always-playing-settings">
             <div className="attendance-options">
-              {attendanceUnits.map((members) => (
-                <label className="attendance-option" key={members.join("-")}>
-                  <input
-                    type="checkbox"
-                    checked={members.some((player) => constraintAnalysis.alwaysPlayingPlayers.includes(player))}
-                    onChange={(event) => toggleAlwaysPlayingUnit(members, event.target.checked)}
-                  />
-                  <span>
-                    <span className="attendance-name">{members.map((player) => displayNames[player]).join("・")}</span>
-                    {members.length === 2 ? <span className="section-note">固定ペア</span> : null}
-                  </span>
-                </label>
-              ))}
+              {attendanceUnits.map((members) => {
+                const selected = members.some((player) => constraintAnalysis.alwaysPlayingPlayers.includes(player));
+                const unitName = members.map((player) => displayNames[player]).join("・");
+                const courtValue = attendanceCourtValue(members);
+                return (
+                  <div className={`attendance-option${selected ? " attendance-selected" : ""}`} key={members.join("-")}>
+                    <label className="attendance-target">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(event) => toggleAlwaysPlayingUnit(members, event.target.checked)}
+                      />
+                      <span>
+                        <span className="attendance-name">{unitName}</span>
+                        {members.length === 2 ? <span className="section-note">固定ペア</span> : null}
+                      </span>
+                    </label>
+                    {selected ? (
+                      <div className="field attendance-court">
+                        <label htmlFor={`attendance-court-${members.join("-")}`}>出場コート</label>
+                        <select
+                          className="select"
+                          id={`attendance-court-${members.join("-")}`}
+                          aria-label={`${unitName}の出場コート`}
+                          value={courtValue}
+                          onChange={(event) => updateAttendanceCourt(members, event.target.value)}
+                        >
+                          <option value="">指定なし</option>
+                          {courtValue === "conflict" ? <option value="conflict" disabled>指定が競合</option> : null}
+                          {courtValue !== "conflict" && Number(courtValue) > constraintAnalysis.activeCourts ? (
+                            <option value={courtValue} disabled>コート{courtValue}</option>
+                          ) : null}
+                          {Array.from({ length: constraintAnalysis.activeCourts }, (_, index) => index + 1).map((court) => (
+                            <option key={court} value={court}>コート{court}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
             {continuation ? <p className="section-note">終了済みの試合はそのまま、未終了の試合に適用します。</p> : null}
           </div>

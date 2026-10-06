@@ -6,6 +6,8 @@ export type PairSetting = {
 
 export type Team = [number, number];
 
+export type AlwaysPlayingCourts = Record<number, number>;
+
 export type CourtPlan = {
   court: number;
   teamA: Team;
@@ -35,6 +37,7 @@ export type GeneratedSchedule = {
 export type ScheduleConstraintAnalysis = {
   activeCourts: number;
   alwaysPlayingPlayers: number[];
+  alwaysPlayingCourts: AlwaysPlayingCourts;
   forcedPlayers: number[];
   possible: boolean;
   error?: string;
@@ -146,18 +149,55 @@ function canFillPlayerCount(units: Unit[], targetPlayers: number) {
   return reachable.has(targetPlayers);
 }
 
+function feasibleOptionalPairCounts(
+  required: Unit[],
+  optional: Unit[],
+  courtCount: number,
+  assignedCourts: AlwaysPlayingCourts
+) {
+  const capacities = Array.from({ length: courtCount }, () => 4);
+  const flexibleRequired = required.filter((unit) => {
+    const court = assignedCourts[unit.members[0]];
+    if (court === undefined) return true;
+    capacities[court - 1] -= unit.members.length;
+    return false;
+  });
+  if (capacities.some((capacity) => capacity < 0)) return [];
+
+  // 固定ペアは2枠、個人は1枠を使います。コートごとの残り枠が奇数なら、
+  // 最低1人の個人参加者が必要です。総人数だけでなく、この内訳も厳密に判定します。
+  const availableSlots = capacities.reduce((sum, capacity) => sum + capacity, 0);
+  const pairCapacity = capacities.reduce((sum, capacity) => sum + Math.floor(capacity / 2), 0);
+  const requiredPairs = flexibleRequired.filter((unit) => unit.fixed).length;
+  const requiredSingles = flexibleRequired.length - requiredPairs;
+  const optionalPairs = optional.filter((unit) => unit.fixed).length;
+  const optionalSingles = optional.length - optionalPairs;
+  const counts: number[] = [];
+  for (let pairCount = 0; pairCount <= optionalPairs; pairCount += 1) {
+    const totalPairs = requiredPairs + pairCount;
+    const singlesNeeded = availableSlots - totalPairs * 2 - requiredSingles;
+    if (totalPairs <= pairCapacity && singlesNeeded >= 0 && singlesNeeded <= optionalSingles) {
+      counts.push(pairCount);
+    }
+  }
+  return counts;
+}
+
 export function analyzeScheduleConstraints(
   participantCount: number,
   requestedCourtCount: number,
   pairs: PairSetting[],
-  alwaysPlayingPlayers: number[] = []
+  alwaysPlayingPlayers: number[] = [],
+  alwaysPlayingCourts: AlwaysPlayingCourts = {}
 ): ScheduleConstraintAnalysis {
   const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
-  if (activeCourts < 1) return { activeCourts: 0, alwaysPlayingPlayers: [], forcedPlayers: [], possible: false, error: "4人以上で作成してください。" };
+  if (activeCourts < 1) return { activeCourts: 0, alwaysPlayingPlayers: [], alwaysPlayingCourts: {}, forcedPlayers: [], possible: false, error: "4人以上で作成してください。" };
 
   const units = buildUnits(participantCount, normalizePairs(pairs, participantCount));
   const { required, optional } = splitAttendanceUnits(units, alwaysPlayingPlayers);
   const requiredPlayers = required.flatMap((unit) => unit.members).sort((left, right) => left - right);
+  const assignedCourts: AlwaysPlayingCourts = {};
+  const result = { activeCourts, alwaysPlayingPlayers: requiredPlayers, alwaysPlayingCourts: assignedCourts, forcedPlayers: [] as number[] };
   const targetPlayers = activeCourts * 4;
   const remainingPlayers = targetPlayers - requiredPlayers.length;
   const possible = remainingPlayers >= 0 && canFillPlayerCount(optional, remainingPlayers);
@@ -165,21 +205,43 @@ export function analyzeScheduleConstraints(
     const error = remainingPlayers < 0
       ? `休みなしの対象は固定ペアの相手を含めて${requiredPlayers.length}人ですが、${activeCourts}コートの出場枠は${targetPlayers}人です。対象を減らすか、コート数を増やしてください。`
       : `休みなしの${requiredPlayers.length}人を入れると残りの出場枠は${remainingPlayers}人ですが、固定ペアを崩さずにこの人数を選べません。休みなしの対象・固定ペア・コート数を変更してください。`;
-    return { activeCourts, alwaysPlayingPlayers: requiredPlayers, forcedPlayers: [], possible, error };
+    return { ...result, possible, error };
+  }
+  for (const unit of required) {
+    const specified = [...new Set(unit.members.map((player) => alwaysPlayingCourts[player])
+      .filter((court) => court !== undefined))];
+    if (specified.length > 1) {
+      return { ...result, possible: false, error: `固定ペアの${unit.members.map((player) => `${player + 1}人目`).join("・")}に異なるコートが指定されています。このペアの出場コートを1つにそろえてください。` };
+    }
+    if (!specified.length) continue;
+    const court = specified[0];
+    if (!Number.isInteger(court) || court < 1 || court > activeCourts) {
+      return { ...result, possible: false, error: `指定したコート${court}は使用できません。現在の参加人数・コート数で使えるのはコート1〜${activeCourts}です。出場コートの指定か基本設定を変更してください。` };
+    }
+    for (const player of unit.members) assignedCourts[player] = court;
+  }
+  for (let court = 1; court <= activeCourts; court += 1) {
+    const assignedCount = Object.values(assignedCourts).filter((value) => value === court).length;
+    if (assignedCount > 4) {
+      return { ...result, possible: false, error: `コート${court}の休みなしの対象は${assignedCount}人ですが、1コートの出場枠は4人です。このコートの対象を減らすか、ほかのコートに変更してください。` };
+    }
+  }
+  if (!feasibleOptionalPairCounts(required, optional, activeCourts, assignedCourts).length) {
+    return { ...result, possible: false, error: "指定コートの残り枠を、固定ペアを崩さずに埋められません。固定ペアは2人まとめて入るため、残り1人や3人の枠には個人参加者も必要です。出場コートの指定・休みなしの対象・固定ペアを変更してください。" };
   }
   if (targetPlayers === participantCount) {
-    return { activeCourts, alwaysPlayingPlayers: requiredPlayers, forcedPlayers: [], possible };
+    return { ...result, possible };
   }
 
   // そのユニットを除くと必要人数を満たせない場合、その参加者は毎試合出場必須です。
   // 固定ペアによって完全な回数平等が不可能な条件を、生成前に画面で説明するために使います。
   const forcedPlayers = optional.flatMap((unit, unitIndex) => (
-    canFillPlayerCount(optional.filter((_, index) => index !== unitIndex), remainingPlayers)
+    feasibleOptionalPairCounts(required, optional.filter((_, index) => index !== unitIndex), activeCourts, assignedCourts).length
       ? []
       : unit.members
   ));
 
-  return { activeCourts, alwaysPlayingPlayers: requiredPlayers, forcedPlayers, possible };
+  return { ...result, forcedPlayers, possible };
 }
 
 function enumerateUnitSelections(units: Unit[], targetPlayers: number) {
@@ -208,7 +270,8 @@ function chooseCandidateUnits(
   targetPlayers: number,
   stats: PlayerStats[],
   restStreaks: number[],
-  random: RandomSource
+  random: RandomSource,
+  optionalPairCounts?: number[]
 ) {
   // 固定ペアは2人で1枠として選びます。大人数時は全組み合わせを調べると
   // スマホで重くなるため、出場の少ない人を軸にした候補を繰り返し作ります。
@@ -223,6 +286,15 @@ function chooseCandidateUnits(
     .sort((left, right) => left.priority - right.priority);
 
   const ordered = weighted.map(({ unit }) => unit);
+  if (optionalPairCounts) {
+    // 指定コートに収まるペア数だけを候補にします。総人数は合っていても、
+    // 個人の不足で各コートの奇数枠を埋められない候補は、最初から選びません。
+    const pairCount = optionalPairCounts[Math.floor(random() * optionalPairCounts.length)];
+    return [
+      ...ordered.filter((unit) => unit.fixed).slice(0, pairCount),
+      ...ordered.filter((unit) => !unit.fixed).slice(0, targetPlayers - pairCount * 2)
+    ];
+  }
   const remainingPlayers = Array.from({ length: ordered.length + 1 }, () => 0);
   for (let index = ordered.length - 1; index >= 0; index -= 1) {
     remainingPlayers[index] = remainingPlayers[index + 1] + ordered[index].members.length;
@@ -278,6 +350,48 @@ function buildCourts(teams: Team[], courtCount: number, random: RandomSource) {
     teamA: shuffledTeams[index * 2],
     teamB: shuffledTeams[index * 2 + 1]
   }));
+}
+
+function buildAssignedCourts(
+  units: Unit[],
+  courtCount: number,
+  assignedCourts: AlwaysPlayingCourts,
+  random: RandomSource
+): CourtPlan[] | null {
+  const courtUnits: Unit[][] = Array.from({ length: courtCount }, () => []);
+  const capacities = Array.from({ length: courtCount }, () => 4);
+  const flexible = units.filter((unit) => {
+    const court = assignedCourts[unit.members[0]];
+    if (court === undefined) return true;
+    courtUnits[court - 1].push(unit);
+    capacities[court - 1] -= unit.members.length;
+    return false;
+  });
+  if (capacities.some((capacity) => capacity < 0)) return null;
+
+  // 指定者を先に配置し、動かせる固定ペアを2枠ずつ、その後に個人を入れます。
+  // ペアから先に埋めると1枠しか残らない場所へペアを入れようとする失敗を防げます。
+  // 各コート内でチームを作るため、個人同士をランダムに組ませてから指定コートが
+  // 食い違うチームを捨てる方法より、成立する配置を確実に生成できます。
+  const ordered = [
+    ...shuffle(flexible.filter((unit) => unit.fixed), random),
+    ...shuffle(flexible.filter((unit) => !unit.fixed), random)
+  ];
+  for (const unit of ordered) {
+    const availableCourts = capacities.flatMap((capacity, index) => capacity >= unit.members.length ? [index] : []);
+    if (!availableCourts.length) return null;
+    const court = availableCourts[Math.floor(random() * availableCourts.length)];
+    courtUnits[court].push(unit);
+    capacities[court] -= unit.members.length;
+  }
+  if (capacities.some((capacity) => capacity !== 0)) return null;
+  const courts: CourtPlan[] = [];
+  for (let index = 0; index < courtCount; index += 1) {
+    const teams = buildTeamsFromUnits(courtUnits[index], random);
+    if (!teams || teams.length !== 2) return null;
+    courts.push({ court: index + 1, teamA: teams[0], teamB: teams[1] });
+  }
+  return courts;
 }
 
 function scoreCandidate(
@@ -403,9 +517,10 @@ export function generateSchedule(
   initialStats?: PlayerStats[],
   initiallyRestedLastMatch?: Set<number>,
   random: RandomSource = Math.random,
-  alwaysPlayingPlayers: number[] = []
+  alwaysPlayingPlayers: number[] = [],
+  alwaysPlayingCourts: AlwaysPlayingCourts = {}
 ): GeneratedSchedule {
-  const analysis = analyzeScheduleConstraints(participantCount, requestedCourtCount, pairs, alwaysPlayingPlayers);
+  const analysis = analyzeScheduleConstraints(participantCount, requestedCourtCount, pairs, alwaysPlayingPlayers, alwaysPlayingCourts);
   if (!analysis.possible) throw new Error(analysis.error);
   const activeCourts = analysis.activeCourts;
 
@@ -416,6 +531,10 @@ export function generateSchedule(
   const requiredPlayers = new Set(analysis.alwaysPlayingPlayers);
   const targetPlayers = activeCourts * 4;
   const remainingPlayers = targetPlayers - requiredPlayers.size;
+  const hasAssignedCourts = Object.keys(analysis.alwaysPlayingCourts).length > 0;
+  const optionalPairCounts = hasAssignedCourts
+    ? feasibleOptionalPairCounts(required, optional, activeCourts, analysis.alwaysPlayingCourts)
+    : undefined;
   const stats = initialStats ? cloneStats(initialStats) : createStats(participantCount);
   const matches: MatchPlan[] = [];
   let restStreaks: number[] = Array.from(
@@ -427,7 +546,10 @@ export function generateSchedule(
   // 可能な30通りを漏れなく比較でき、ランダム抽選の取り逃しを防げます。
   // 必須出場のユニットは先に確保し、残りの枠だけを公平性スコアで比較します。
   // 必須者を「出やすくする」罰点方式ではなく候補の前提とするので、休みは発生しません。
-  const exactSelections = optional.length <= 10 ? enumerateUnitSelections(optional, remainingPlayers) : null;
+  const exactSelections = optional.length <= 10
+    ? enumerateUnitSelections(optional, remainingPlayers).filter((selection) => !optionalPairCounts
+      || optionalPairCounts.includes(selection.filter((unit) => unit.fixed).length))
+    : null;
   if (exactSelections && exactSelections.length === 0) {
     throw new Error("現在の参加人数・コート数・固定ペア数では、組み合わせを作成できません。固定ペアを減らすか、コート数を変更してください。");
   }
@@ -440,12 +562,14 @@ export function generateSchedule(
     for (let attempt = 0; attempt < attemptCount; attempt += 1) {
       const selectedOptionalUnits = exactSelections
         ? exactSelections[attempt % exactSelections.length]
-        : chooseCandidateUnits(optional, remainingPlayers, stats, restStreaks, random);
+        : chooseCandidateUnits(optional, remainingPlayers, stats, restStreaks, random, optionalPairCounts);
       if (!selectedOptionalUnits) continue;
 
-      const teams = buildTeamsFromUnits([...required, ...selectedOptionalUnits], random);
-      if (!teams) continue;
-      const courts = buildCourts(teams, activeCourts, random);
+      const selectedUnits = [...required, ...selectedOptionalUnits];
+      const teams = hasAssignedCourts ? null : buildTeamsFromUnits(selectedUnits, random);
+      const courts = hasAssignedCourts
+        ? buildAssignedCourts(selectedUnits, activeCourts, analysis.alwaysPlayingCourts, random)
+        : teams && buildCourts(teams, activeCourts, random);
       if (!courts) continue;
 
       const score = scoreCandidate(courts, participantCount, stats, restStreaks, fixedPairKeys, requiredPlayers, random);
