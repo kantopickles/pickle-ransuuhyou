@@ -159,3 +159,69 @@ test("固定ペアが毎試合必須になる条件を生成前に検出する",
     ));
   }
 });
+
+test("休みなしの個人・固定ペアは全試合出場し、残りの参加者は公平に配分する", () => {
+  const cases = [
+    { count: 8, courts: 1, pairs: [], selected: [0], required: [0] },
+    { count: 8, courts: 1, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [0], required: [0, 1] },
+    { count: 10, courts: 2, pairs: [], selected: [0, 1], required: [0, 1] },
+    { count: 20, courts: 2, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [0, 2], required: [0, 1, 2] }
+  ] satisfies { count: number; courts: number; pairs: PairSetting[]; selected: number[]; required: number[] }[];
+
+  for (const scenario of cases) {
+    for (let seed = 1; seed <= 8; seed += 1) {
+      const schedule = generateSchedule(scenario.count, scenario.courts, 20, scenario.pairs,
+        undefined, undefined, seededRandom(seed), scenario.selected);
+      assertScheduleIntegrity(schedule, scenario.count, scenario.courts, scenario.pairs);
+      for (const player of scenario.required) {
+        assert.equal(schedule.stats[player].played, 20);
+        assert.equal(schedule.stats[player].rested, 0);
+        assert.ok(schedule.matches.every((match) => !match.resting.includes(player)));
+      }
+      const otherCounts = schedule.stats.filter((_, player) => !scenario.required.includes(player))
+        .map((stat) => stat.played);
+      assert.ok(Math.max(...otherCounts) - Math.min(...otherCounts) <= 1,
+        `${scenario.count}人・seed ${seed}: 休みなしの対象以外の出場回数が偏っている`);
+      if (scenario.count === 8 && scenario.required.length === 2) {
+        for (let player = 2; player < scenario.count; player += 1) {
+          assert.ok(Math.max(0, ...schedule.stats[player].partners.values()) <= 4,
+            `seed ${seed}: 休みなしの固定ペア以外も同じペアを繰り返している`);
+          assert.ok(longestRestStreak(schedule, player) <= 3);
+        }
+      }
+    }
+  }
+});
+
+test("休みなしの対象で全出場枠が埋まっても、重複せず正しく生成する", () => {
+  for (const count of [4, 8]) {
+    const schedule = generateSchedule(count, 1, 20, [], undefined, undefined, seededRandom(count), [0, 1, 2, 3]);
+    assertScheduleIntegrity(schedule, count, 1, []);
+    assert.deepEqual(schedule.stats.map((stat) => stat.played), Array.from({ length: count }, (_, player) => player < 4 ? 20 : 0));
+  }
+});
+
+test("休みなしと固定ペアで成立しない条件は、理由を返して生成を拒否する", () => {
+  const tooMany = analyzeScheduleConstraints(8, 1, [{ id: "pair", a: 0, b: 1 }], [0, 2, 3, 4]);
+  assert.equal(tooMany.possible, false);
+  assert.deepEqual(tooMany.alwaysPlayingPlayers, [0, 1, 2, 3, 4]);
+  assert.match(tooMany.error ?? "", /5人.*出場枠は4人/);
+  assert.throws(() => generateSchedule(8, 1, 20, [{ id: "pair", a: 0, b: 1 }],
+    undefined, undefined, seededRandom(1), [0, 2, 3, 4]), /出場枠は4人/);
+
+  const pairs: PairSetting[] = [{ id: "first", a: 0, b: 1 }, { id: "second", a: 2, b: 3 }];
+  const cannotFill = analyzeScheduleConstraints(7, 1, pairs, [4, 5, 6]);
+  assert.equal(cannotFill.possible, false);
+  assert.match(cannotFill.error ?? "", /残りの出場枠は1人.*固定ペア/);
+  assert.throws(() => generateSchedule(7, 1, 20, pairs, undefined, undefined, seededRandom(1), [4, 5, 6]), /残りの出場枠は1人/);
+});
+
+test("休みなしによって別の参加者も必須になる場合を検出し、不正な指定は無視する", () => {
+  const pairs: PairSetting[] = [
+    { id: "first", a: 0, b: 1 }, { id: "second", a: 2, b: 3 }, { id: "third", a: 4, b: 5 }
+  ];
+  const analysis = analyzeScheduleConstraints(8, 1, pairs, [6, 6, -1, 8, 1.5]);
+  assert.equal(analysis.possible, true);
+  assert.deepEqual(analysis.alwaysPlayingPlayers, [6]);
+  assert.deepEqual(analysis.forcedPlayers, [7]);
+});

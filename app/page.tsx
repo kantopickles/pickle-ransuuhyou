@@ -8,6 +8,7 @@ import {
   applyMatchStats,
   createStats,
   generateSchedule,
+  getParticipantUnits,
   type GeneratedSchedule,
   type MatchPlan,
   type PairSetting,
@@ -94,7 +95,8 @@ function buildContinuationSchedule(
   activeNames: string[],
   requestedCourtCount: number,
   requestedMatchCount: number,
-  pairs: PairSetting[]
+  pairs: PairSetting[],
+  alwaysPlayingPlayers: number[]
 ) {
   const completedMatches = context.originalMatches
     .filter((match) => context.checkedMatches.includes(match.match))
@@ -173,7 +175,9 @@ function buildContinuationSchedule(
     remainingMatchCount,
     pairs,
     initialStats,
-    initiallyRested
+    initiallyRested,
+    undefined,
+    alwaysPlayingPlayers
   );
   const preservedMatches = completedMatches.map((match, index) => ({
     ...match,
@@ -255,6 +259,7 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [names, setNames] = useState<string[]>(() => createInitialNames(10));
   const [pairs, setPairs] = useState<PairSetting[]>([]);
+  const [alwaysPlayingPlayers, setAlwaysPlayingPlayers] = useState<number[]>([]);
   const [schedule, setSchedule] = useState<GeneratedSchedule | null>(null);
   const [generatedMeta, setGeneratedMeta] = useState<GeneratedMeta | null>(null);
   const [scheduleDirty, setScheduleDirty] = useState(false);
@@ -264,6 +269,7 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [namesOpen, setNamesOpen] = useState(false);
   const [pairsOpen, setPairsOpen] = useState(false);
+  const [attendanceOpen, setAttendanceOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -310,6 +316,7 @@ export default function Home() {
           setTitle(typeof parsed.title === "string" ? parsed.title.trim() : "");
           setNames(Array.from({ length: importedCount }, (_, index) => visibleNames[index] || `${index + 1}番`));
           setPairs([]);
+          setAlwaysPlayingPlayers([]);
           setSchedule(null);
           setGeneratedMeta(null);
           setEditHistory([]);
@@ -355,6 +362,7 @@ export default function Home() {
         setTitle(typeof parsed.title === "string" ? parsed.title : "");
         setNames(Array.from({ length: importedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
         setPairs([]);
+        setAlwaysPlayingPlayers([]);
         if (parsed.continuation) {
           const context = parsed.continuation;
           const activeCourts = Math.max(1, ...context.originalMatches.map((match) => match.courts.length));
@@ -409,6 +417,7 @@ export default function Home() {
         title?: string;
         names?: string[];
         pairs?: PairSetting[];
+        alwaysPlayingPlayers?: number[];
         schedule?: StoredSchedule | null;
         scheduleDirty?: boolean;
         shareEditToken?: string;
@@ -426,6 +435,9 @@ export default function Home() {
       setTitle(parsed.title ?? "");
       setNames(Array.from({ length: savedCount }, (_, index) => parsed.names?.[index] || `${index + 1}番`));
       setPairs(parsed.pairs ?? []);
+      setAlwaysPlayingPlayers(Array.isArray(parsed.alwaysPlayingPlayers)
+        ? parsed.alwaysPlayingPlayers.filter((player) => Number.isInteger(player) && player >= 0 && player < savedCount)
+        : []);
       setCurrentShareId(parsed.shareId ?? "");
       setCurrentShareEditToken(parsed.shareEditToken ?? "");
       setContinuation(parsed.continuation ?? null);
@@ -462,6 +474,7 @@ export default function Home() {
         title,
         names,
         pairs,
+        alwaysPlayingPlayers,
         participantCount,
         schedule: schedule
           ? {
@@ -485,7 +498,7 @@ export default function Home() {
         }))
       })
     );
-  }, [participantCount, courtCount, matchCount, title, names, pairs, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, editHistory, storageLoaded]);
+  }, [participantCount, courtCount, matchCount, title, names, pairs, alwaysPlayingPlayers, checkedMatches, schedule, generatedMeta, scheduleDirty, currentShareEditToken, currentShareId, continuation, editHistory, storageLoaded]);
 
   const displayNames = useMemo(
     () => names.map((name, index) => name.trim() || `${index + 1}番`),
@@ -498,10 +511,12 @@ export default function Home() {
     : 0;
   const nextMatchNumber = schedule?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
   const constraintAnalysis = useMemo(
-    () => analyzeScheduleConstraints(participantCount, courtCount, pairs),
-    [participantCount, courtCount, pairs]
+    () => analyzeScheduleConstraints(participantCount, courtCount, pairs, alwaysPlayingPlayers),
+    [participantCount, courtCount, pairs, alwaysPlayingPlayers]
   );
   const forcedPlayerNames = constraintAnalysis.forcedPlayers.map((player) => displayNames[player]);
+  const attendanceUnits = useMemo(() => getParticipantUnits(participantCount, pairs), [participantCount, pairs]);
+  const alwaysPlayingNames = constraintAnalysis.alwaysPlayingPlayers.map((player) => displayNames[player]);
 
   function markScheduleDirty() {
     if (schedule) {
@@ -522,6 +537,7 @@ export default function Home() {
     markScheduleDirty();
     setParticipantCount(nextCount);
     setNames((current) => Array.from({ length: nextCount }, (_, index) => current[index] || `${index + 1}番`));
+    setAlwaysPlayingPlayers((current) => current.filter((player) => player < nextCount));
     setPairs((current) =>
       current.filter(
         (pair) =>
@@ -559,6 +575,8 @@ export default function Home() {
     setError("");
     setParticipantCount((count) => count - 1);
     setNames((current) => current.filter((_, nameIndex) => nameIndex !== index));
+    setAlwaysPlayingPlayers((current) => current.filter((player) => player !== index)
+      .map((player) => player > index ? player - 1 : player));
     setPairs((current) => current.flatMap((pair) => {
       if (pair.a === index || pair.b === index) return [];
       return [{
@@ -592,6 +610,13 @@ export default function Home() {
   function removePair(id: string) {
     markScheduleDirty();
     setPairs((current) => current.filter((pair) => pair.id !== id));
+  }
+
+  function toggleAlwaysPlayingUnit(members: number[], checked: boolean) {
+    markScheduleDirty();
+    setAlwaysPlayingPlayers((current) => checked
+      ? Array.from(new Set([...current, ...members]))
+      : current.filter((player) => !members.includes(player)));
   }
 
   async function requestShareRecord(
@@ -667,7 +692,7 @@ export default function Home() {
     try {
       if (continuation) {
         const nextTitle = title.trim();
-        const continued = buildContinuationSchedule(continuation, displayNames, courtCount, matchCount, pairs);
+        const continued = buildContinuationSchedule(continuation, displayNames, courtCount, matchCount, pairs, alwaysPlayingPlayers);
         const response = await fetch(`/api/admin/schedules/${encodeURIComponent(continuation.shareId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -706,13 +731,14 @@ export default function Home() {
         setSettingsOpen(false);
         setNamesOpen(false);
         setPairsOpen(false);
+        setAttendanceOpen(false);
         setCurrentShareId(continuation.shareId);
         setCurrentShareEditToken("");
         setImportNotice("未終了の試合を更新しました。参加者はこれまでと同じ共有リンクで確認できます。");
         return;
       }
 
-      const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs);
+      const nextSchedule = generateSchedule(participantCount, courtCount, matchCount, pairs, undefined, undefined, undefined, alwaysPlayingPlayers);
       const nextTitle = title.trim();
       setSchedule(nextSchedule);
       setEditHistory([]);
@@ -729,6 +755,7 @@ export default function Home() {
       setSettingsOpen(false);
       setNamesOpen(false);
       setPairsOpen(false);
+      setAttendanceOpen(false);
       setCurrentShareId("");
       setCurrentShareEditToken("");
       setContinuation(null);
@@ -739,6 +766,11 @@ export default function Home() {
   }
 
   async function requestGenerate() {
+    if (!constraintAnalysis.possible) {
+      setError(constraintAnalysis.error ?? "現在の条件では組み合わせを作成できません。");
+      setAttendanceOpen(true);
+      return;
+    }
     setPasswordChecking(true);
     try {
       const response = await fetch("/api/admin/verify", { cache: "no-store" });
@@ -773,6 +805,7 @@ export default function Home() {
     setTitle("");
     setNames(createInitialNames(10));
     setPairs([]);
+    setAlwaysPlayingPlayers([]);
     setSchedule(null);
     setGeneratedMeta(null);
     setScheduleDirty(false);
@@ -782,6 +815,7 @@ export default function Home() {
     setSettingsOpen(true);
     setNamesOpen(false);
     setPairsOpen(false);
+    setAttendanceOpen(false);
     setPasswordOpen(false);
     setPasswordInput("");
     setPasswordError("");
@@ -1341,10 +1375,58 @@ export default function Home() {
         {forcedPlayerNames.length ? (
           <div className="notice constraint-notice" role="status">
             <strong>出場回数に差が出ます。</strong><br />
-            固定ペアを崩さずに{constraintAnalysis.activeCourts}コート分（{constraintAnalysis.activeCourts * 4}人）の
+            {alwaysPlayingNames.length ? "休みなしの対象を出場させ、固定ペアを崩さずに" : "固定ペアを崩さずに"}
+            {constraintAnalysis.activeCourts}コート分（{constraintAnalysis.activeCourts * 4}人）の
             出場枠を埋めるには、{forcedPlayerNames.join("・")}の出場が毎試合必要です。
             そのため、この参加者はほかの参加者より出場回数が多くなります。
           </div>
+        ) : null}
+      </section>
+
+      <section className="section collapsible">
+        <button
+          className="section-toggle"
+          type="button"
+          aria-expanded={attendanceOpen}
+          aria-controls="always-playing-settings"
+          onClick={() => setAttendanceOpen((open) => !open)}
+        >
+          <span>
+            <span className="section-title">全試合出場（休みなし）</span>
+            <span className="section-note attendance-summary">
+              {alwaysPlayingNames.length ? `${alwaysPlayingNames.length}人：${alwaysPlayingNames.join("・")}` : "設定なし"}
+            </span>
+          </span>
+          <span className="chevron" aria-hidden="true">{attendanceOpen ? "▲" : "▼"}</span>
+        </button>
+        {attendanceOpen ? (
+          <div className="attendance-settings" id="always-playing-settings">
+            <div className="attendance-options">
+              {attendanceUnits.map((members) => (
+                <label className="attendance-option" key={members.join("-")}>
+                  <input
+                    type="checkbox"
+                    checked={members.some((player) => constraintAnalysis.alwaysPlayingPlayers.includes(player))}
+                    onChange={(event) => toggleAlwaysPlayingUnit(members, event.target.checked)}
+                  />
+                  <span>
+                    <span className="attendance-name">{members.map((player) => displayNames[player]).join("・")}</span>
+                    {members.length === 2 ? <span className="section-note">固定ペア</span> : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {continuation ? <p className="section-note">終了済みの試合はそのまま、未終了の試合に適用します。</p> : null}
+          </div>
+        ) : null}
+        {alwaysPlayingNames.length > 0 && constraintAnalysis.possible && participantCount > constraintAnalysis.activeCourts * 4 ? (
+          <div className="notice constraint-notice" role="status">
+            {alwaysPlayingNames.join("・")}は全試合出場するため、ほかの参加者より出場回数が多くなります。
+            残りの参加者の間で、出場回数と休みをできるだけ公平に割り振ります。
+          </div>
+        ) : null}
+        {!constraintAnalysis.possible && constraintAnalysis.error ? (
+          <div className="error constraint-notice" role="alert">{constraintAnalysis.error}</div>
         ) : null}
       </section>
 

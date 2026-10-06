@@ -302,6 +302,47 @@ button {
   grid-template-columns: 1fr 1fr 48px;
 }
 
+.attendance-settings {
+  padding: 0 14px 14px;
+}
+
+.attendance-options {
+  display: grid;
+  column-gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.attendance-option {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 4px;
+}
+
+.attendance-option input {
+  accent-color: var(--brand);
+  flex: 0 0 24px;
+  height: 24px;
+  margin: 0;
+  width: 24px;
+}
+
+.attendance-option > span {
+  min-width: 0;
+}
+
+.attendance-name,
+.attendance-summary {
+  overflow-wrap: anywhere;
+}
+
+.attendance-name {
+  font-weight: 700;
+}
+
 .icon-button,
 .secondary,
 .primary,
@@ -1358,6 +1399,10 @@ button:disabled {
 }
 
 @media (max-width: 560px) {
+  .attendance-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .page {
     padding-bottom: 150px;
     padding-left: 12px;

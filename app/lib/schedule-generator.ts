@@ -34,8 +34,10 @@ export type GeneratedSchedule = {
 
 export type ScheduleConstraintAnalysis = {
   activeCourts: number;
+  alwaysPlayingPlayers: number[];
   forcedPlayers: number[];
   possible: boolean;
+  error?: string;
 };
 
 type Unit = {
@@ -63,7 +65,7 @@ function shuffle<T>(items: T[], random: RandomSource) {
 }
 
 function spread(values: number[]) {
-  return Math.max(...values) - Math.min(...values);
+  return values.length ? Math.max(...values) - Math.min(...values) : 0;
 }
 
 function varianceNumerator(values: number[]) {
@@ -120,6 +122,19 @@ function buildUnits(participantCount: number, fixedPairs: Team[]) {
   return units;
 }
 
+export function getParticipantUnits(participantCount: number, pairs: PairSetting[]): number[][] {
+  return buildUnits(participantCount, normalizePairs(pairs, participantCount)).map((unit) => unit.members);
+}
+
+function splitAttendanceUnits(units: Unit[], alwaysPlayingPlayers: number[]) {
+  const selected = new Set(alwaysPlayingPlayers.filter((player) => Number.isInteger(player)));
+  // 固定ペアの片方が指定されている場合は、ユニット全体を必須出場にします。
+  // これにより「休みなし」と「ペア固定」を両立し、片方だけが休む候補を作りません。
+  const required = units.filter((unit) => unit.members.some((player) => selected.has(player)));
+  const optional = units.filter((unit) => !unit.members.some((player) => selected.has(player)));
+  return { required, optional };
+}
+
 function canFillPlayerCount(units: Unit[], targetPlayers: number) {
   const reachable = new Set<number>([0]);
   for (const unit of units) {
@@ -134,27 +149,37 @@ function canFillPlayerCount(units: Unit[], targetPlayers: number) {
 export function analyzeScheduleConstraints(
   participantCount: number,
   requestedCourtCount: number,
-  pairs: PairSetting[]
+  pairs: PairSetting[],
+  alwaysPlayingPlayers: number[] = []
 ): ScheduleConstraintAnalysis {
   const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
-  if (activeCourts < 1) return { activeCourts: 0, forcedPlayers: [], possible: false };
+  if (activeCourts < 1) return { activeCourts: 0, alwaysPlayingPlayers: [], forcedPlayers: [], possible: false, error: "4人以上で作成してください。" };
 
   const units = buildUnits(participantCount, normalizePairs(pairs, participantCount));
+  const { required, optional } = splitAttendanceUnits(units, alwaysPlayingPlayers);
+  const requiredPlayers = required.flatMap((unit) => unit.members).sort((left, right) => left - right);
   const targetPlayers = activeCourts * 4;
-  const possible = canFillPlayerCount(units, targetPlayers);
-  if (!possible || targetPlayers === participantCount) {
-    return { activeCourts, forcedPlayers: [], possible };
+  const remainingPlayers = targetPlayers - requiredPlayers.length;
+  const possible = remainingPlayers >= 0 && canFillPlayerCount(optional, remainingPlayers);
+  if (!possible) {
+    const error = remainingPlayers < 0
+      ? `休みなしの対象は固定ペアの相手を含めて${requiredPlayers.length}人ですが、${activeCourts}コートの出場枠は${targetPlayers}人です。対象を減らすか、コート数を増やしてください。`
+      : `休みなしの${requiredPlayers.length}人を入れると残りの出場枠は${remainingPlayers}人ですが、固定ペアを崩さずにこの人数を選べません。休みなしの対象・固定ペア・コート数を変更してください。`;
+    return { activeCourts, alwaysPlayingPlayers: requiredPlayers, forcedPlayers: [], possible, error };
+  }
+  if (targetPlayers === participantCount) {
+    return { activeCourts, alwaysPlayingPlayers: requiredPlayers, forcedPlayers: [], possible };
   }
 
   // そのユニットを除くと必要人数を満たせない場合、その参加者は毎試合出場必須です。
   // 固定ペアによって完全な回数平等が不可能な条件を、生成前に画面で説明するために使います。
-  const forcedPlayers = units.flatMap((unit, unitIndex) => (
-    canFillPlayerCount(units.filter((_, index) => index !== unitIndex), targetPlayers)
+  const forcedPlayers = optional.flatMap((unit, unitIndex) => (
+    canFillPlayerCount(optional.filter((_, index) => index !== unitIndex), remainingPlayers)
       ? []
       : unit.members
   ));
 
-  return { activeCourts, forcedPlayers, possible };
+  return { activeCourts, alwaysPlayingPlayers: requiredPlayers, forcedPlayers, possible };
 }
 
 function enumerateUnitSelections(units: Unit[], targetPlayers: number) {
@@ -261,6 +286,7 @@ function scoreCandidate(
   stats: PlayerStats[],
   restStreaks: number[],
   fixedPairKeys: Set<string>,
+  alwaysPlayingPlayers: Set<number>,
   random: RandomSource
 ) {
   const playing = new Set<number>();
@@ -286,16 +312,28 @@ function scoreCandidate(
     }
   }
 
-  const playedAfter = stats.map((stat, index) => stat.played + (playing.has(index) ? 1 : 0));
-  const restedAfter = stats.map((stat, index) => stat.rested + (playing.has(index) ? 0 : 1));
+  // 休みなしの対象は必ず出場するため、公平性の比較から外します。
+  // 対象者との回数差を埋めようとすると、残りの参加者間の配分が偏るためです。
+  // 集計そのものには全員を含め、ペア・対戦の重複も全員分を評価します。
+  const playedAfter = stats.flatMap((stat, index) => alwaysPlayingPlayers.has(index)
+    ? [] : [stat.played + (playing.has(index) ? 1 : 0)]);
+  const restedAfter = stats.flatMap((stat, index) => alwaysPlayingPlayers.has(index)
+    ? [] : [stat.rested + (playing.has(index) ? 0 : 1)]);
   const restStreaksAfter = restStreaks.map((streak, index) => (playing.has(index) ? 0 : streak + 1));
-  const longRestPenalty = restStreaksAfter.reduce((sum, streak) => sum + (streak >= 3 ? (streak - 2) ** 2 : 0), 0);
-  const repeatedRestPenalty = restStreaksAfter.filter((streak) => streak === 2).length;
+  const rotatingSlots = playing.size - alwaysPlayingPlayers.size;
+  // 必須者が増えると、ほかの人に回せる枠が減ります。たとえば6人に2枠を回す場合、
+  // 常に2連続休みまでに制限すると同じ2人組の交互出場が固定されてしまいます。
+  // 休みなし設定時は人数と残り枠から休みの目安を計算し、1試合分の入れ替え余地を設けます。
+  const restLimit = alwaysPlayingPlayers.size && rotatingSlots > 0
+    ? Math.max(2, Math.ceil(playedAfter.length / rotatingSlots))
+    : 2;
+  const longRestPenalty = restStreaksAfter.reduce((sum, streak) => sum + Math.max(0, streak - restLimit) ** 2, 0);
+  const repeatedRestPenalty = restStreaksAfter.reduce((sum, streak) => sum + (streak >= 2 && streak <= restLimit ? streak - 1 : 0), 0);
   const partnerPenalty = partnerRepeats.reduce((sum, count) => sum + count * count, 0);
   const opponentPenalty = opponentRepeats.reduce((sum, count) => sum + count * count, 0);
 
   // スコアは小さいほど良い候補です。
-  // 出場回数の差は最優先のまま、3連続以上の休みには非常に大きな罰点を付けます。
+  // 出場回数の差は最優先のまま、休みの目安を超える連続休みには大きな罰点を付けます。
   // 一方、8人・1コートで全員を完全に交互出場させると同じ4人組が固定されるため、
   // 2連続休みの罰点は抑え、ペアの入れ替わりが起きる余地を残しています。
   return (
@@ -364,15 +402,20 @@ export function generateSchedule(
   pairs: PairSetting[],
   initialStats?: PlayerStats[],
   initiallyRestedLastMatch?: Set<number>,
-  random: RandomSource = Math.random
+  random: RandomSource = Math.random,
+  alwaysPlayingPlayers: number[] = []
 ): GeneratedSchedule {
-  const activeCourts = Math.min(requestedCourtCount, Math.floor(participantCount / 4));
-  if (activeCourts < 1) throw new Error("4人以上で作成してください。");
+  const analysis = analyzeScheduleConstraints(participantCount, requestedCourtCount, pairs, alwaysPlayingPlayers);
+  if (!analysis.possible) throw new Error(analysis.error);
+  const activeCourts = analysis.activeCourts;
 
   const fixedPairs = normalizePairs(pairs, participantCount);
   const fixedPairKeys = new Set(fixedPairs.map((pair) => pairKey(...pair)));
   const units = buildUnits(participantCount, fixedPairs);
+  const { required, optional } = splitAttendanceUnits(units, analysis.alwaysPlayingPlayers);
+  const requiredPlayers = new Set(analysis.alwaysPlayingPlayers);
   const targetPlayers = activeCourts * 4;
+  const remainingPlayers = targetPlayers - requiredPlayers.size;
   const stats = initialStats ? cloneStats(initialStats) : createStats(participantCount);
   const matches: MatchPlan[] = [];
   let restStreaks: number[] = Array.from(
@@ -382,7 +425,9 @@ export function generateSchedule(
 
   // 10ユニット以下なら出場者の全組み合わせを調べます。今回の8人条件では
   // 可能な30通りを漏れなく比較でき、ランダム抽選の取り逃しを防げます。
-  const exactSelections = units.length <= 10 ? enumerateUnitSelections(units, targetPlayers) : null;
+  // 必須出場のユニットは先に確保し、残りの枠だけを公平性スコアで比較します。
+  // 必須者を「出やすくする」罰点方式ではなく候補の前提とするので、休みは発生しません。
+  const exactSelections = optional.length <= 10 ? enumerateUnitSelections(optional, remainingPlayers) : null;
   if (exactSelections && exactSelections.length === 0) {
     throw new Error("現在の参加人数・コート数・固定ペア数では、組み合わせを作成できません。固定ペアを減らすか、コート数を変更してください。");
   }
@@ -393,17 +438,17 @@ export function generateSchedule(
     const attemptCount = exactSelections ? Math.max(900, exactSelections.length * 24) : 1_400;
 
     for (let attempt = 0; attempt < attemptCount; attempt += 1) {
-      const selectedUnits = exactSelections
+      const selectedOptionalUnits = exactSelections
         ? exactSelections[attempt % exactSelections.length]
-        : chooseCandidateUnits(units, targetPlayers, stats, restStreaks, random);
-      if (!selectedUnits) continue;
+        : chooseCandidateUnits(optional, remainingPlayers, stats, restStreaks, random);
+      if (!selectedOptionalUnits) continue;
 
-      const teams = buildTeamsFromUnits(selectedUnits, random);
+      const teams = buildTeamsFromUnits([...required, ...selectedOptionalUnits], random);
       if (!teams) continue;
       const courts = buildCourts(teams, activeCourts, random);
       if (!courts) continue;
 
-      const score = scoreCandidate(courts, participantCount, stats, restStreaks, fixedPairKeys, random);
+      const score = scoreCandidate(courts, participantCount, stats, restStreaks, fixedPairKeys, requiredPlayers, random);
       if (score < bestScore) {
         bestCourts = courts;
         bestScore = score;
