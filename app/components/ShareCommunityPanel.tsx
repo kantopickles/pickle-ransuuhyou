@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ArrowDown, CalendarDays } from "lucide-react";
 import {
   COMMUNITY_LINKS,
   getPracticeLevels,
@@ -9,7 +10,7 @@ import {
 
 type EventCategory = "beginner" | "intermediate" | "tournament";
 
-export default function ShareCommunityPanel() {
+export default function ShareCommunityPanel({ scheduleReady }: { scheduleReady: boolean }) {
   const eventListRef = useRef<HTMLDivElement>(null);
   const [currentEvent, setCurrentEvent] = useState(0);
   const [eventCategory, setEventCategory] = useState<EventCategory>("beginner");
@@ -95,9 +96,21 @@ export default function ShareCommunityPanel() {
     eventListRef.current?.scrollTo({ left: 0 });
   }
 
+  function jumpToSchedule() {
+    const schedule = document.getElementById("today-match-cards");
+    if (!schedule) return;
+    // 旧形式の共有リンクはURLのハッシュに対戦表を保存しているため、
+    // アンカー遷移でハッシュを書き換えず、スクロールとフォーカスだけを移動します。
+    schedule.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start"
+    });
+    schedule.focus({ preventScroll: true });
+  }
+
   return (
     <aside className="community-panel" aria-label="関東ピックルズからのお知らせ">
-      <div className="community-social-grid">
+      <div className={`community-social-grid${scheduleReady ? " community-social-grid-with-schedule" : ""}`}>
         <div className="community-social-item">
           <a
             className="community-social-button community-instagram"
@@ -133,6 +146,22 @@ export default function ShareCommunityPanel() {
           )}
           <p>個別で問い合わせしたい方はこちら！</p>
         </div>
+
+        {scheduleReady ? (
+          <div className="community-social-item">
+            <button
+              type="button"
+              className="community-social-button community-match-cards"
+              aria-label="本日の対戦カード"
+              aria-controls="today-match-cards"
+              onClick={jumpToSchedule}
+            >
+              <CalendarDays size={30} aria-hidden="true" />
+              <span>本日の<br />対戦カード</span>
+              <ArrowDown className="community-jump-arrow" size={18} aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <section className="community-events" aria-label="練習会・大会のお知らせ">

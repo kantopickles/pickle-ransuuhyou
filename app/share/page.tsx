@@ -274,15 +274,15 @@ export default function SharePage() {
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
 
-      <ShareCommunityPanel />
+      <ShareCommunityPanel scheduleReady={Boolean(payload)} />
 
       {!payload && !error ? <div className="section loading" role="status">乱数表を読み込んでいます...</div> : null}
       {error ? <div className="error" role="alert">{error}</div> : null}
 
       {payload ? (
         <>
-          <section className="section">
-            <h2>{payload.title || "生成結果"}</h2>
+          <section className="section" id="today-match-cards" tabIndex={-1} aria-labelledby="today-match-cards-heading">
+            <h2 id="today-match-cards-heading">{payload.title || "生成結果"}</h2>
             {payload.matches.map((match) => (
               <article className="match" key={match.match}>
                 <h3>第{match.match}試合</h3>

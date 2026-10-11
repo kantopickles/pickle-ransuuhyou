@@ -499,6 +499,47 @@ button:disabled {
   background: #06a94d;
 }
 
+.community-social-grid-with-schedule {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.community-social-grid-with-schedule .community-social-button {
+  font-size: 16px;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 32px 44px;
+  justify-items: center;
+  min-height: 102px;
+  padding: 10px;
+  position: relative;
+  text-align: center;
+}
+
+.community-social-grid-with-schedule .community-social-button > span:not(.community-link-arrow) {
+  line-height: 1.35;
+}
+
+.community-social-grid-with-schedule .community-link-arrow,
+.community-jump-arrow {
+  position: absolute;
+  right: 6px;
+  top: 10px;
+}
+
+.community-social-grid-with-schedule .community-link-arrow {
+  font-size: 20px;
+}
+
+.community-match-cards {
+  background: var(--brand-dark);
+  cursor: pointer;
+  width: 100%;
+}
+
+#today-match-cards {
+  scroll-margin-top: 16px;
+}
+
 .community-social-button:focus-visible,
 .community-social-button:hover {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
@@ -1588,6 +1629,11 @@ button:disabled {
     grid-template-columns: 30px minmax(0, 1fr) 14px;
     min-height: 54px;
     padding: 8px;
+  }
+
+  .community-social-grid-with-schedule .community-social-button {
+    font-size: 14px;
+    padding: 10px 8px;
   }
 
   .community-social-button.is-disabled {

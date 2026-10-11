@@ -263,15 +263,15 @@ export default function ShortSharePage() {
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
 
-      <ShareCommunityPanel />
+      <ShareCommunityPanel scheduleReady={Boolean(payload)} />
 
       {!payload && !error ? <div className="section loading" role="status">乱数表を読み込んでいます...</div> : null}
       {error ? <div className="error" role="alert">{error}</div> : null}
 
       {payload ? (
         <>
-          <section className="section">
-            <h2>{payload.title || "生成結果"}</h2>
+          <section className="section" id="today-match-cards" tabIndex={-1} aria-labelledby="today-match-cards-heading">
+            <h2 id="today-match-cards-heading">{payload.title || "生成結果"}</h2>
             <div className="progress-panel" aria-live="polite">
               <div className="progress-copy">
                 <span className="progress-label">進行状況</span>
