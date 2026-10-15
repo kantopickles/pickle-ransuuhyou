@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import ServiceWorkerRegistration from "./components/ServiceWorkerRegistration";
+import ThemeSwitcher from "./components/ThemeSwitcher";
+import { THEME_BOOTSTRAP_SCRIPT, THEME_COLORS } from "./lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,7 +32,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#0f766e"
+  themeColor: THEME_COLORS.light,
+  colorScheme: "light dark"
 };
 
 export default function RootLayout({
@@ -39,8 +42,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja">
+    <html lang="ja" data-theme="light" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body>
+        <ThemeSwitcher />
         {children}
         <ServiceWorkerRegistration />
       </body>
