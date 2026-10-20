@@ -146,7 +146,7 @@ export default function LineAccessDemo() {
 function AccountIdentity() {
   return (
     <div className={styles.identity}>
-      <img src="/icon-192x192.png" alt="関東ピックルズのアイコン" width={52} height={52} />
+      <img src="/ricchan-official-account.png" alt="関東ピックルズの公式LINEアイコン" width={52} height={52} />
       <div><strong>関東ピックルズ</strong><span>公式LINEアカウント</span></div>
       <ShieldCheck size={22} aria-hidden="true" />
     </div>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, Check, LockKeyhole, MessageCircle, RefreshCw } from "lucide-react";
 import type { LineAccessState } from "../lib/line-access";
+import { APP_ICONS } from "../lib/app-icons";
 import styles from "./line-access.module.css";
 
 type Status = { access: LineAccessState; accountId?: string | null; friendUrl?: string | null };
@@ -55,7 +56,7 @@ export default function LineAccessGate({ returnTo, preview = false, onAllowed }:
 
   return (
     <section className={styles.gate} aria-labelledby="line-access-heading">
-      <img className={styles.avatar} src="/icon-192x192.png" alt="関東ピックルズ" width={80} height={80} />
+      <img className={styles.avatar} src={APP_ICONS.small} alt="ピックルボール乱数表" width={80} height={80} />
       <p className={styles.brand}>関東ピックルズ</p>
       {status?.accountId ? <p className={styles.account}>友だち登録先：{status.accountId}</p> : null}
       <ol className={styles.steps} aria-label="対戦表を開く手順">

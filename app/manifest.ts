@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { APP_ICONS } from "./lib/app-icons";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -14,19 +15,19 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["sports", "utilities"],
     icons: [
       {
-        src: "/icon-192x192.png",
+        src: APP_ICONS.small,
         sizes: "192x192",
         type: "image/png",
         purpose: "any"
       },
       {
-        src: "/icon-512x512.png",
+        src: APP_ICONS.large,
         sizes: "512x512",
         type: "image/png",
         purpose: "any"
       },
       {
-        src: "/maskable-icon-512x512.png",
+        src: APP_ICONS.maskable,
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable"

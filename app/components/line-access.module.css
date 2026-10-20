@@ -9,7 +9,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
 }
-.avatar { display: block; margin: 0 auto 10px; border-radius: 50%; }
+.avatar { display: block; margin: 0 auto 10px; border-radius: 12px; }
 .brand { font-size: 16px; font-weight: 700; margin: 0 0 8px; }
 .account { font-size: 13px; color: var(--muted); margin: 0 0 24px; }
 .steps { display: flex; justify-content: space-between; gap: 8px; list-style: none; margin: 0 0 28px; padding: 0; }

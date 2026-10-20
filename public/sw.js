@@ -1,14 +1,15 @@
-const CACHE_VERSION = "pickleball-pwa-v3";
+const CACHE_VERSION = "pickleball-pwa-v4";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const APP_SHELL = [
   "/",
   "/offline",
   "/pickleball-random-table-hero.png",
-  "/icon-192x192.png",
-  "/icon-512x512.png",
-  "/maskable-icon-512x512.png",
-  "/apple-icon.png"
+  "/randomizer-app-icon.png",
+  "/randomizer-icon-192.png",
+  "/randomizer-icon-512.png",
+  "/randomizer-icon-maskable-512.png",
+  "/randomizer-apple-icon.png"
 ];
 
 self.addEventListener("install", (event) => {
