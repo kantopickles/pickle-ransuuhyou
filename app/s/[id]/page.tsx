@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import ScheduleImageButton from "../../components/ScheduleImageButton";
 import ShareCommunityPanel from "../../components/ShareCommunityPanel";
+import LineAccessGate from "../../components/LineAccessGate";
 
 type Team = [number, number];
 
@@ -160,72 +161,92 @@ export default function ShortSharePage() {
   const [checkedMatches, setCheckedMatches] = useState<Set<number>>(() => new Set());
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadPayload() {
-      try {
-        const response = await fetch(`/api/share/${encodeURIComponent(params.id)}`);
-        if (!response.ok) throw new Error("not found");
-        const result = (await response.json()) as {
-          checkedMatches?: number[];
-          payload: SharePayload | CompactSharePayload;
-        };
-        if (active) {
-          setCheckedMatches(new Set(result.checkedMatches ?? []));
-          setPayload(normalizePayload(result.payload));
-        }
-      } catch {
-        if (active) setError("共有リンクを読み込めませんでした。リンクが間違っているか、削除された可能性があります。");
-      }
-    }
-
-    loadPayload();
-
-    return () => {
-      active = false;
-    };
-  }, [params.id]);
+  const [needsLine, setNeedsLine] = useState(false);
+  const [accessAttempt, setAccessAttempt] = useState(0);
 
   useEffect(() => {
     let stopped = false;
+    let denied = false;
+    let loading = false;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
 
-    async function refreshPayload() {
+    async function refreshPayload(initial = false) {
+      if (stopped || denied || loading) return false;
+      loading = true;
       try {
         const response = await fetch(`/api/share/${encodeURIComponent(params.id)}`, { cache: "no-store" });
-        if (!response.ok || stopped) return;
+        if (stopped) return false;
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({})) as { access?: string };
+          if (stopped) return false;
+          if (result.access) {
+            denied = true;
+            setPayload(null);
+            setNeedsLine(true);
+            socket?.close();
+          } else {
+            denied = true;
+            setPayload(null);
+            setError("共有リンクを読み込めませんでした。リンクが間違っているか、削除された可能性があります。");
+            socket?.close();
+          }
+          return false;
+        }
         const result = (await response.json()) as {
           checkedMatches?: number[];
           payload: SharePayload | CompactSharePayload;
         };
+        if (stopped || denied) return false;
         setCheckedMatches(new Set(result.checkedMatches ?? []));
         setPayload(normalizePayload(result.payload));
+        setNeedsLine(false);
+        setError("");
+        return true;
       } catch {
         // Keep the last successfully loaded schedule during a brief reconnect.
-      }
+        if (initial && !stopped) setError("通信に失敗しました。接続を確認してページを再読み込みしてください。");
+        return false;
+      } finally { loading = false; }
     }
 
     function connect() {
-      if (stopped) return;
+      if (stopped || denied) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime/${encodeURIComponent(params.id)}`);
       socket.addEventListener("message", () => void refreshPayload());
       socket.addEventListener("close", () => {
-        if (!stopped) reconnectTimer = window.setTimeout(connect, 1500);
+        scheduleReconnect();
       });
     }
 
-    connect();
+    function scheduleReconnect() {
+      if (stopped || denied) return;
+      reconnectTimer = window.setTimeout(async () => {
+        if (await refreshPayload()) connect();
+        else scheduleReconnect();
+      }, 3000);
+    }
+
+    void refreshPayload(true).then((loaded) => {
+      if (loaded) connect();
+      else scheduleReconnect();
+    });
+    // Recheck authorization and progress even when a socket stays connected.
+    const timer = window.setInterval(() => {
+      if (!denied && document.visibilityState === "visible") void refreshPayload();
+    }, 60000);
+    const onVisible = () => { if (!denied && document.visibilityState === "visible") void refreshPayload(); };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [params.id]);
+  }, [params.id, accessAttempt]);
 
   async function handleCopy() {
     if (!payload) return;
@@ -255,6 +276,13 @@ export default function ShortSharePage() {
     ? payload.matches.filter((match) => checkedMatches.has(match.match)).length
     : 0;
   const nextMatchNumber = payload?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
+
+  if (needsLine) {
+    return <main className="page share-page"><LineAccessGate returnTo={`/s/${params.id}`} onAllowed={() => {
+      setNeedsLine(false);
+      setAccessAttempt((attempt) => attempt + 1);
+    }} /></main>;
+  }
 
   return (
     <main className="page share-page">

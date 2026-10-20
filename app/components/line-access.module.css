@@ -1,0 +1,39 @@
+.gate {
+  width: 100%;
+  max-width: 540px;
+  margin: 32px auto;
+  padding: 28px 24px;
+  text-align: center;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.avatar { display: block; margin: 0 auto 10px; border-radius: 50%; }
+.brand { font-size: 16px; font-weight: 700; margin: 0 0 8px; }
+.account { font-size: 13px; color: var(--muted); margin: 0 0 24px; }
+.steps { display: flex; justify-content: space-between; gap: 8px; list-style: none; margin: 0 0 28px; padding: 0; }
+.steps li { display: flex; align-items: center; flex-direction: column; gap: 8px; flex: 1; font-size: 13px; color: var(--muted); }
+.steps li > span { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 50%; font-weight: 700; }
+.steps .done { color: var(--brand-ink); }
+.steps .done > span { background: var(--brand-dark); color: white; }
+.icon { margin: 0 auto 16px; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; color: var(--brand-ink); background: var(--panel-soft); border-radius: 50%; }
+.gate h1 { font-size: 24px; line-height: 1.5; margin: 0 0 12px; overflow-wrap: anywhere; }
+.description { font-size: 16px; line-height: 1.8; margin: 0 0 24px; }
+.controls { display: grid; gap: 12px; }
+.loginLink { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 56px; color: var(--brand-ink); font-size: 19px; font-weight: 700; text-underline-offset: 5px; }
+.lineButton, .secondary { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 56px; width: 100%; padding: 12px; border-radius: 6px; font-size: 17px; font-weight: 700; line-height: 1.5; text-decoration: none; }
+.lineButton { color: white; background: #06c755; border: 1px solid #06c755; }
+.lineButton:hover { background: #05b34c; }
+.secondary { color: var(--brand-ink); background: var(--panel-soft); border: 1px solid var(--line); }
+.textLink { padding: 10px; color: var(--brand-ink); font-size: 14px; text-underline-offset: 4px; }
+.privacy { color: var(--muted); font-size: 13px; line-height: 1.8; margin: 20px 0 0; }
+.success { color: var(--brand-ink); font-weight: 700; }
+.gate a:focus-visible, .gate button:focus-visible { outline: 3px solid var(--brand-ink); outline-offset: 4px; }
+@media (max-width: 400px) {
+  .gate { margin: 12px auto; padding: 24px 16px; }
+  .gate h1 { font-size: 21px; }
+  .lineButton, .secondary { font-size: 15px; gap: 6px; }
+  .steps { gap: 4px; }
+  .steps li { font-size: 12px; }
+}

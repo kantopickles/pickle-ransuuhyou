@@ -6,6 +6,11 @@
     "nodejs_compat"
   ],
   "main": "worker.ts",
+  "vars": {
+    "LINE_ACCESS_REQUIRED": "false",
+    "LINE_OFFICIAL_ACCOUNT_ID": "@892ixgpm",
+    "LINE_CALLBACK_URL": "https://pickleball-randomizer.kanto-pickles-draw.workers.dev/api/line/callback"
+  },
   "assets": {
     "directory": "dist/client",
     "not_found_handling": "none",

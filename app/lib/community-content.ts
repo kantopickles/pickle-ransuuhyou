@@ -24,7 +24,7 @@ export function getPracticeLevels(title: string): PracticeLevel[] {
 
 export const COMMUNITY_LINKS = {
   instagram: "https://www.instagram.com/kantopickles_ricchan/",
-  line: "https://pickleball-randomizer.kanto-pickles-draw.workers.dev/s/x7JWeVoG",
+  line: "https://line.me/R/ti/p/@892ixgpm",
   practiceTennisBear: "https://www.tennisbear.net/user/303162/organized-event",
   tournamentTennisBear: "https://www.tennisbear.net/user/36614/organized-event"
 } as const;
