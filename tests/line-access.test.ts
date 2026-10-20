@@ -31,6 +31,7 @@ async function begin() {
 function mockLine(friend: boolean | "timeout" | "expired", audience = env.LINE_CHANNEL_ID) {
   let calls = 0;
   globalThis.fetch = async (input, init) => {
+    assert.equal(init?.redirect, "manual", "Cloudflare does not implement redirect:error; do not follow credentials to another location");
     const url = new URL(String(input));
     assert.equal(url.origin, "https://api.line.me");
     calls++;
@@ -107,6 +108,34 @@ test("callback validates token audience and refuses tokens for another channel",
   const response = await handleLineRequest(request(`/api/line/callback?code=test-code&state=${authorize.searchParams.get("state")}`, flow), env);
   assert.equal(cookieValue(response!, "session"), "");
   assert.ok(response?.headers.get("location")?.includes("line_error=connection"));
+});
+
+test("a LINE API redirect fails closed without following it or issuing a session", async () => {
+  const { flow, authorize } = await begin();
+  let calls = 0;
+  globalThis.fetch = async (_input, init) => {
+    calls++;
+    assert.equal(init?.redirect, "manual");
+    return new Response(null, { status: 302, headers: { Location: "https://other.example/collect" } });
+  };
+  const response = await handleLineRequest(request(`/api/line/callback?code=test-code&state=${authorize.searchParams.get("state")}`, flow), env);
+  assert.equal(cookieValue(response!, "session"), "");
+  assert.ok(response?.headers.get("location")?.includes("line_error=connection"));
+  assert.equal(calls, 1);
+});
+
+test("callback diagnostics never log credentials, codes, tokens or raw provider messages", async () => {
+  const { flow, authorize } = await begin();
+  const warnings: unknown[][] = [];
+  const warn = console.warn;
+  try {
+    console.warn = (...args) => { warnings.push(args); };
+    globalThis.fetch = async () => { throw new Error(`Unsafe provider message: ${env.LINE_CHANNEL_SECRET} secret-user-token test-code`); };
+    await handleLineRequest(request(`/api/line/callback?code=test-code&state=${authorize.searchParams.get("state")}`, flow), env);
+    const logged = JSON.stringify(warnings);
+    assert.ok(logged.includes("token_exchange"));
+    for (const value of [env.LINE_CHANNEL_SECRET!, "secret-user-token", "test-code", "Unsafe provider message"]) assert.ok(!logged.includes(value));
+  } finally { console.warn = warn; }
 });
 
 test("a login flow expires after ten minutes and cannot be moved to another origin", async () => {

@@ -95,7 +95,11 @@ function cookie(request: Request, purpose: string, value: string, age: number) {
 }
 
 async function lineFetch(url: string, init?: RequestInit) {
-  return fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(8000) });
+  // Workers supports only "follow" and "manual", not the browser's "error".
+  // Inspect redirects ourselves so credentials never follow another location.
+  const response = await fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(8000) });
+  if (response.status >= 300 && response.status < 400) throw new Error("Unexpected LINE redirect");
+  return response;
 }
 
 async function friendship(accessToken: string) {
@@ -198,20 +202,40 @@ export async function handleLineRequest(request: Request, env: LineEnvironment):
     else if (url.searchParams.has("error")) error = "cancelled";
     else if (!url.searchParams.get("code")) error = "session";
     else {
+      // Only allowlisted status/type checks are logged. Never log the callback
+      // URL, authorization code, tokens, client secret, or provider error text.
+      const diagnostic: Record<string, string | number | boolean> = { stage: "token_exchange" };
       try {
         const tokenResponse = await lineFetch("https://api.line.me/oauth2/v2.1/token", {
           method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ grant_type: "authorization_code", code: url.searchParams.get("code")!, redirect_uri: settings.callback, client_id: settings.channel, client_secret: settings.secret, code_verifier: flow.verifier })
         });
-        if (!tokenResponse.ok) throw new Error("Token exchange failed");
+        diagnostic.httpStatus = tokenResponse.status;
+        if (!tokenResponse.ok) {
+          const failure = await tokenResponse.json().catch(() => ({})) as { error?: unknown };
+          const knownErrors = ["invalid_client", "invalid_grant", "invalid_request", "invalid_scope", "unsupported_grant_type"];
+          diagnostic.providerError = typeof failure.error === "string" && knownErrors.includes(failure.error) ? failure.error : "other";
+          throw new Error("Token exchange failed");
+        }
+        diagnostic.stage = "token_response";
         const token = await tokenResponse.json() as { access_token?: unknown; expires_in?: unknown; scope?: unknown; token_type?: unknown };
+        diagnostic.hasAccessToken = typeof token.access_token === "string";
+        diagnostic.validTokenLength = typeof token.access_token === "string" && token.access_token.length <= 2000;
+        diagnostic.validExpiry = typeof token.expires_in === "number" && token.expires_in > 60;
+        diagnostic.isBearer = token.token_type === "Bearer";
+        diagnostic.hasProfileScope = typeof token.scope === "string" && token.scope.split(" ").includes("profile");
         if (typeof token.access_token !== "string" || token.access_token.length > 2000 || typeof token.expires_in !== "number" || token.expires_in <= 60 || token.token_type !== "Bearer" || typeof token.scope !== "string" || !token.scope.split(" ").includes("profile")) throw new Error("Invalid token response");
+        diagnostic.stage = "token_verify";
         const verifyUrl = new URL("https://api.line.me/oauth2/v2.1/verify");
         verifyUrl.searchParams.set("access_token", token.access_token);
         const verifyResponse = await lineFetch(verifyUrl.href);
+        diagnostic.httpStatus = verifyResponse.status;
         if (!verifyResponse.ok) throw new Error("Token verification failed");
         const verified = await verifyResponse.json() as { client_id?: unknown; expires_in?: unknown };
+        diagnostic.validAudience = verified.client_id === settings.channel;
+        diagnostic.validVerifiedExpiry = typeof verified.expires_in === "number" && verified.expires_in > 60;
         if (verified.client_id !== settings.channel || typeof verified.expires_in !== "number" || verified.expires_in <= 60) throw new Error("Wrong token audience");
+        diagnostic.stage = "session_cookie";
         const session: Session = {
           accessToken: token.access_token, friend: false, checked: 0,
           expires: seconds() + Math.min(30 * DAY, token.expires_in - 60, verified.expires_in - 60)
@@ -220,7 +244,10 @@ export async function handleLineRequest(request: Request, env: LineEnvironment):
         // friendship_status_changed. Existing friends also return false there.
         // The status endpoint checks the actual friendFlag after redirect.
         headers.append("Set-Cookie", cookie(request, "session", await seal(session, "session", settings), session.expires - seconds()));
-      } catch { error = "connection"; }
+      } catch {
+        console.warn("LINE_CALLBACK_DIAGNOSTIC", JSON.stringify(diagnostic));
+        error = "connection";
+      }
     }
     if (error) destination.searchParams.set("line_error", error);
     headers.set("Location", destination.href);

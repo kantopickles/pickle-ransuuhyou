@@ -4,8 +4,9 @@
 
 ## 現在の状態
 
-アプリ側の実装はありますが、`LINE_ACCESS_REQUIRED=false` の間は共有リンクは従来どおり開けます。
-LINE側の設定前に参加者全員が締め出されるのを避けるためです。
+本番はLINEの実接続テスト成功後、`LINE_ACCESS_REQUIRED=true` で友だち限定にしています。
+ログイン、公式LINE **@892ixgpm** の友だち確認、再読み込み後のログイン保持を確認済みです。
+`LINE_ACCESS_REQUIRED=false` に戻した場合、共有リンクは従来どおり公開閲覧できます。
 設定不足のまま `true` にすると、制限を無視せず、準備中の画面を表示します。
 
 ## 1. 公式LINEを確認する
@@ -60,7 +61,7 @@ https://pickleball-randomizer.kanto-pickles-draw.workers.dev/api/line/callback
 | --- | --- |
 | `LINE_OFFICIAL_ACCOUNT_ID` | `@892ixgpm` |
 | `LINE_CALLBACK_URL` | 上記のコールバックURL |
-| `LINE_ACCESS_REQUIRED` | 最初は `false` |
+| `LINE_ACCESS_REQUIRED` | 本番は `true`。新規環境の設定中は `false` |
 
 ## 4. 制限を有効にする前に接続テストする
 
