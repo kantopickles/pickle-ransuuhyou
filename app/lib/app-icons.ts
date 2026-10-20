@@ -1,8 +1,8 @@
-// New filenames keep the previous portrait out of browser and PWA icon caches.
+// Versioned filenames keep the previous artwork out of browser and PWA caches.
 export const APP_ICONS = {
-  master: "/randomizer-app-icon.png",
-  small: "/randomizer-icon-192.png",
-  large: "/randomizer-icon-512.png",
-  maskable: "/randomizer-icon-maskable-512.png",
-  apple: "/randomizer-apple-icon.png"
+  master: "/randomizer-app-icon-pastelpink.png",
+  small: "/randomizer-icon-pastelpink-192.png",
+  large: "/randomizer-icon-pastelpink-512.png",
+  maskable: "/randomizer-icon-pastelpink-maskable-512.png",
+  apple: "/randomizer-apple-icon-pastelpink.png"
 } as const;

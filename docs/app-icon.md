@@ -1,5 +1,8 @@
 # Randomizer app icon
 
+The current approved white/pastel-pink variant is documented in
+`app-icon-pastelpink.md`. The notes below describe the original teal design.
+
 Created 2026-10-21 with the built-in `image_gen` tool. No external image API key was used.
 
 ## Design

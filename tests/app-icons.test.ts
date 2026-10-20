@@ -26,5 +26,5 @@ test("マニフェスト・ブラウザ・ログイン画面とPWAキャッシ�
   }
   const worker = readFileSync(new URL("../public/sw.js", import.meta.url), "utf8");
   for (const path of Object.values(APP_ICONS)) assert.ok(worker.includes(path));
-  assert.ok(worker.includes("pickleball-pwa-v4"));
+  assert.ok(worker.includes("pickleball-pwa-v5"));
 });
