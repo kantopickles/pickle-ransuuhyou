@@ -22,10 +22,11 @@ function cookieValue(response: Response, name: string) {
   return response.headers.getSetCookie().find((item) => item.startsWith(`__Host-pickleball_line_${name}=`))?.split(";")[0] ?? "";
 }
 
-async function begin() {
-  const response = await handleLineRequest(request("/api/line/start?returnTo=/s/ABC12345"), env);
+async function begin(returnTo = "/s/ABC12345", options = "") {
+  const response = await handleLineRequest(request(`/api/line/start?returnTo=${encodeURIComponent(returnTo)}${options}`), env);
   assert.equal(response?.status, 302);
-  return { authorize: new URL(response!.headers.get("location")!), flow: cookieValue(response!, "flow") };
+  const authorize = new URL(response!.headers.get("location")!);
+  return { authorize, flow: cookieValue(response!, `flow_${authorize.searchParams.get("state")!.slice(0, 48)}`) };
 }
 
 function mockLine(friend: boolean | "timeout" | "expired", audience = env.LINE_CHANNEL_ID) {
@@ -85,9 +86,67 @@ test("authorization uses state, S256 PKCE and add-friend prompt without requesti
   assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
   assert.equal(authorize.searchParams.get("scope"), "profile");
   assert.equal(authorize.searchParams.get("bot_prompt"), "aggressive");
-  assert.match(authorize.searchParams.get("state")!, /^[a-f0-9]{48}$/);
+  assert.match(authorize.searchParams.get("state")!, /^[a-f0-9]{50,1000}$/);
   assert.ok(flow);
   assert.notEqual((await begin()).authorize.searchParams.get("state"), authorize.searchParams.get("state"));
+});
+
+test("parallel login attempts keep independent state and PKCE cookies", async () => {
+  mockLine(true);
+  const first = await begin();
+  const second = await begin("/s/SECOND123");
+  assert.notEqual(first.flow.split("=")[0], second.flow.split("=")[0]);
+  const cookies = `${first.flow}; ${second.flow}`;
+  for (const [attempt, path] of [[first, "/s/ABC12345"], [second, "/s/SECOND123"]] as const) {
+    const response = await handleLineRequest(request(`/api/line/callback?code=test-code&state=${attempt.authorize.searchParams.get("state")}`, cookies), env);
+    assert.equal(response?.headers.get("location"), origin + path);
+    assert.ok(cookieValue(response!, "session"));
+    const cleared = response!.headers.getSetCookie().filter(value => value.includes("Max-Age=0"));
+    assert.equal(cleared.length, 1);
+    assert.ok(cleared[0].startsWith(attempt.flow.split("=")[0] + "="));
+  }
+});
+
+test("a callback in another browser preserves the share but never exchanges an unbound code", async () => {
+  const calls = mockLine(true);
+  const { authorize } = await begin();
+  const response = await handleLineRequest(request(`/api/line/callback?code=test-code&state=${authorize.searchParams.get("state")}`), env);
+  assert.equal(response?.headers.get("location"), `${origin}/s/ABC12345?line_error=browser`);
+  assert.equal(cookieValue(response!, "session"), "");
+  assert.equal(calls(), 0);
+  assert.equal((await readLineAccess(request("/api/share/ABC12345"), env)).state, "login_required");
+  assert.equal(response?.headers.get("Referrer-Policy"), "no-referrer");
+});
+
+test("browser recovery uses a fresh login and disables app auto-login without dropping PKCE", async () => {
+  const { authorize, flow } = await begin("/s/ABC12345", "&browser=1");
+  assert.equal(authorize.searchParams.get("disable_auto_login"), "true");
+  assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
+  assert.ok(flow);
+  const ordinary = await begin();
+  assert.equal(ordinary.authorize.searchParams.get("disable_auto_login"), null);
+});
+
+test("tampered return contexts cannot redirect to a supplied destination or grant a session", async () => {
+  const calls = mockLine(true);
+  const { authorize } = await begin();
+  const state = authorize.searchParams.get("state")!;
+  const changed = state.slice(0, -4) + (state.endsWith("0000") ? "1111" : "0000");
+  const response = await handleLineRequest(request(`/api/line/callback?code=test-code&state=${changed}&returnTo=https://attacker.example`), env);
+  assert.equal(response?.headers.get("location"), `${origin}/line-access?line_error=session`);
+  assert.equal(cookieValue(response!, "session"), "");
+  assert.equal(calls(), 0);
+});
+
+test("replaying a callback does not destroy an existing authenticated session", async () => {
+  mockLine(true);
+  const session = await login();
+  const { authorize } = await begin();
+  const calls = mockLine(true);
+  const response = await handleLineRequest(request(`/api/line/callback?code=already-used&state=${authorize.searchParams.get("state")}`, session), env);
+  assert.equal(cookieValue(response!, "session"), "");
+  assert.equal(calls(), 0);
+  assert.equal((await readLineAccess(request("/api/share/ABC12345", session), env)).state, "allowed");
 });
 
 test("wrong state, missing flow and cancelled consent never issue a session", async () => {

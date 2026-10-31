@@ -13,6 +13,7 @@ export type LineAccessState = "allowed" | "login_required" | "friend_required" |
 export type LineAccess = { state: LineAccessState; cookie?: string };
 type Config = { channel: string; secret: string; encryption: string; callback: string; account: string };
 type Flow = { state: string; verifier: string; returnTo: string; expires: number };
+type ReturnContext = { returnTo: string; expires: number };
 type Session = { accessToken: string; expires: number; friend: boolean; checked: number };
 
 const DAY = 86400;
@@ -61,7 +62,7 @@ async function key(settings: Config) {
 // Tokens never enter localStorage, a URL, or readable JavaScript cookies. AES-GCM
 // both hides their contents and rejects modified cookies. AAD prevents swapping
 // login-flow cookies with sessions, or reusing them for another channel/account.
-async function seal(value: Flow | Session, purpose: string, settings: Config) {
+async function seal(value: Flow | Session | ReturnContext, purpose: string, settings: Config) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aad = encoder.encode(`${purpose}:${settings.channel}:${settings.account}:${settings.callback}`);
   const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, await key(settings), encoder.encode(JSON.stringify(value)));
@@ -92,6 +93,20 @@ function readCookie(request: Request, purpose: string) {
 
 function cookie(request: Request, purpose: string, value: string, age: number) {
   return `${cookieName(request, purpose)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.max(0, Math.floor(age))}${new URL(request.url).protocol === "https:" ? "; Secure" : ""}`;
+}
+
+// Each login attempt gets its own cookie, so opening another QR/link or double
+// tapping login cannot overwrite the first attempt's state and PKCE verifier.
+function flowPurpose(state: string | null) {
+  return state && /^[a-f0-9]{48,1000}$/.test(state) ? `flow_${state.slice(0, 48)}` : "flow";
+}
+
+async function returnContext(state: string | null, settings: Config) {
+  if (!state || !/^[a-f0-9]{50,1000}$/.test(state) || state.length % 2 !== 0) return null;
+  const bytes = Uint8Array.from(state.slice(48).match(/../g)!, (hex) => parseInt(hex, 16));
+  const context = await open<ReturnContext>(new TextDecoder().decode(bytes), "return", settings);
+  return context && Number.isFinite(context.expires) && context.expires > seconds()
+    && context.returnTo === safeLineReturnTo(context.returnTo) ? context : null;
 }
 
 async function lineFetch(url: string, init?: RequestInit) {
@@ -178,9 +193,18 @@ export async function handleLineRequest(request: Request, env: LineEnvironment):
   if (!settings || new URL(settings.callback).origin !== url.origin) return lineAccessResponse({ state: "not_configured" });
 
   if (url.pathname === "/api/line/start") {
-    const state = Array.from(crypto.getRandomValues(new Uint8Array(24)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(24)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const returnTo = safeLineReturnTo(url.searchParams.get("returnTo"));
+    const expires = seconds() + 600;
+    // The authenticated return context carries ONLY navigation information. It
+    // never carries a token or verifier and never substitutes for the browser
+    // cookie. If LINE returns in a different browser, we can keep the intended
+    // share URL, but must start a fresh, cookie-bound login before granting access.
+    // Hex encoding keeps LINE's state parameter strictly alphanumeric.
+    const context = await seal({ returnTo, expires }, "return", settings);
+    const state = nonce + Array.from(encoder.encode(context), (byte) => byte.toString(16).padStart(2, "0")).join("");
     const verifier = random();
-    const flow: Flow = { state, verifier, returnTo: safeLineReturnTo(url.searchParams.get("returnTo")), expires: seconds() + 600 };
+    const flow: Flow = { state, verifier, returnTo, expires };
     const authorize = new URL("https://access.line.me/oauth2/v2.1/authorize");
     authorize.search = new URLSearchParams({
       response_type: "code", client_id: settings.channel, redirect_uri: settings.callback,
@@ -189,16 +213,25 @@ export async function handleLineRequest(request: Request, env: LineEnvironment):
       code_challenge_method: "S256"
     }).toString();
     if (url.searchParams.get("switch") === "1") authorize.searchParams.set("prompt", "login");
-    return new Response(null, { status: 302, headers: { ...PRIVATE_HEADERS, Location: authorize.href, "Set-Cookie": cookie(request, "flow", await seal(flow, "flow", settings), 600) } });
+    if (url.searchParams.get("browser") === "1") authorize.searchParams.set("disable_auto_login", "true");
+    return new Response(null, { status: 302, headers: { ...PRIVATE_HEADERS, Location: authorize.href, "Set-Cookie": cookie(request, flowPurpose(state), await seal(flow, "flow", settings), 600) } });
   }
   if (url.pathname === "/api/line/callback") {
-    const flow = await open<Flow>(readCookie(request, "flow"), "flow", settings);
+    const state = url.searchParams.get("state");
+    const purpose = flowPurpose(state);
+    // Accept legacy in-flight logins during rollout without changing sessions.
+    const flow = await open<Flow>(readCookie(request, purpose) ?? readCookie(request, "flow"), "flow", settings);
     const validFlow = flow && flow.expires > seconds() && flow.state === url.searchParams.get("state") && typeof flow.verifier === "string";
-    const destination = new URL(validFlow ? safeLineReturnTo(flow.returnTo) : "/line-access", url.origin);
+    const context = validFlow ? null : await returnContext(state, settings);
+    const destination = new URL(validFlow ? safeLineReturnTo(flow.returnTo) : context?.returnTo ?? "/line-access", url.origin);
     const headers = new Headers(PRIVATE_HEADERS);
-    headers.append("Set-Cookie", cookie(request, "flow", "", 0));
+    headers.append("Set-Cookie", cookie(request, purpose, "", 0));
+    if (readCookie(request, "flow")) headers.append("Set-Cookie", cookie(request, "flow", "", 0));
     let error = "";
-    if (!validFlow) error = "session";
+    if (!validFlow) {
+      error = context ? "browser" : "session";
+      console.warn("LINE_FLOW_DIAGNOSTIC", JSON.stringify({ reason: context ? "browser_context_missing" : "invalid_or_expired_flow", hasFlowCookie: Boolean(readCookie(request, purpose) || readCookie(request, "flow")) }));
+    }
     else if (url.searchParams.has("error")) error = "cancelled";
     else if (!url.searchParams.get("code")) error = "session";
     else {
