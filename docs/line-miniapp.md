@@ -30,10 +30,16 @@ The production internal channel is `2012345212`, with LIFF ID
 official account is linked to `@892ixgpm`, with friend-add `On (normal)` and the
 existing `openid, profile` scopes. Privacy and terms URLs are configured.
 
-Worker configuration keeps mini sharing disabled pending the real-device
-connection test. Existing share links, rich menus and message delivery settings
-are unchanged. The operator explicitly chose not to alter the rich menu; an
-alternative official-account return entry still needs to be agreed and set up.
+The operator confirmed that the production mini link opens the schedule in
+smartphone LINE. Mini sharing is enabled: newly issued participant links and QR
+codes use the production mini permanent link. Existing web share links remain
+valid. This confirms the initial launch only, not the full device/auth matrix
+listed below.
+
+The operator deferred the official-account return feature. Do not add a return
+entry to the rich menu, link collection, greeting or automatic replies. Existing
+menus and message delivery settings remain unchanged. The implemented history
+routes remain available within the app, but no official-account entry is added.
 
 ## LINE Console Setup Checklist
 
@@ -62,9 +68,9 @@ Provider: `関東ピックルズ` (2005657811). Link the mini app to official ac
 8. Only after successful testing set `LINE_MINIAPP_SHARE_ENABLED=true` and deploy.
    New share links/QR codes then use the mini permanent link. Existing `/s/` links
    continue to work in the web viewer.
-9. Place the stable HTTPS `/resume` URL in an official-account menu or keyword reply.
-   Preserve the existing Instagram/link collection/YouTube menu unless the operator
-   chooses a replacement layout. Do not overwrite unrelated menu items.
+9. Official-account return entry is deferred by the operator (2026-11-03).
+   Do not change the menu, link collection or replies to add `/resume` unless
+   the operator requests it again.
 
 Unauthenticated mini apps may be published with limited features. Certification
 and any acceptance by LINE are separate external processes; this implementation
