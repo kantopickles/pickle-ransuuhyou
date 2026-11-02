@@ -22,7 +22,20 @@
   it redirects to the mini-app entry. No individual user's share ID is placed in
   the official account's common menu or reply.
 
-## LINE Console Setup Still Requires Operator Action
+## Production Connection Status (2026-11-03)
+
+The operator created `関東ピックルズ対戦表` and accepted the platform agreements.
+The production internal channel is `2012345212`, with LIFF ID
+`2012345212-6NyHtvbD`. Its endpoint is the production `/mini` URL. The default
+official account is linked to `@892ixgpm`, with friend-add `On (normal)` and the
+existing `openid, profile` scopes. Privacy and terms URLs are configured.
+
+Worker configuration keeps mini sharing disabled pending the real-device
+connection test. Existing share links, rich menus and message delivery settings
+are unchanged. The operator explicitly chose not to alter the rich menu; an
+alternative official-account return entry still needs to be agreed and set up.
+
+## LINE Console Setup Checklist
 
 Provider: `関東ピックルズ` (2005657811). Link the mini app to official account
 `@892ixgpm`, not the other similarly named official account.

@@ -9,7 +9,10 @@
   "vars": {
     "LINE_ACCESS_REQUIRED": "true",
     "LINE_OFFICIAL_ACCOUNT_ID": "@892ixgpm",
-    "LINE_CALLBACK_URL": "https://pickleball-randomizer.kanto-pickles-draw.workers.dev/api/line/callback"
+    "LINE_CALLBACK_URL": "https://pickleball-randomizer.kanto-pickles-draw.workers.dev/api/line/callback",
+    "LINE_MINIAPP_CHANNEL_ID": "2012345212",
+    "LINE_MINIAPP_LIFF_ID": "2012345212-6NyHtvbD",
+    "LINE_MINIAPP_SHARE_ENABLED": "false"
   },
   "assets": {
     "directory": "dist/client",
