@@ -5,15 +5,23 @@ import { ArrowRight, Check, LockKeyhole, MessageCircle, RefreshCw } from "lucide
 import type { LineAccessState } from "../lib/line-access";
 import { APP_ICONS } from "../lib/app-icons";
 import { lineCallbackMessage, lineRecoveryReturnTo, PENDING_LINE_SHARE } from "../lib/line-access-ui";
+import { MiniAccessRetry, useLineMiniApp } from "./LineMiniAppProvider";
 import styles from "./line-access.module.css";
 
 type Status = { access: LineAccessState; accountId?: string | null; friendUrl?: string | null };
 
-export default function LineAccessGate({ returnTo, preview = false, onAllowed }: {
+type GateProps = {
   returnTo: string;
   preview?: boolean;
   onAllowed?: () => void;
-}) {
+};
+
+export default function LineAccessGate(props: GateProps) {
+  const mini = useLineMiniApp();
+  return mini ? <MiniAccessRetry /> : <WebLineAccessGate {...props} />;
+}
+
+function WebLineAccessGate({ returnTo, preview = false, onAllowed }: GateProps) {
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

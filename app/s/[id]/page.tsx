@@ -1,25 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { LocateFixed, UserRound, X } from "lucide-react";
 import ScheduleImageButton from "../../components/ScheduleImageButton";
 import ShareCommunityPanel from "../../components/ShareCommunityPanel";
 import LineAccessGate from "../../components/LineAccessGate";
-
-type Team = [number, number];
-
-type CourtPlan = {
-  court: number;
-  teamA: Team;
-  teamB: Team;
-};
-
-type MatchPlan = {
-  match: number;
-  courts: CourtPlan[];
-  resting: number[];
-  participants?: number[];
-};
+import { useLineMiniApp } from "../../components/LineMiniAppProvider";
+import RecentVisit from "../../components/RecentVisit";
+import {
+  currentMatch, initialJumpTarget, normalizeCheckedMatches, normalizePayload, playerStatus,
+  readViewerPreference, rememberParticipant, resolveParticipant, saveViewerPreference,
+  type SharePayload, type Team, type ViewerPreference
+} from "./viewer-helpers";
+import styles from "./viewer.module.css";
 
 type SharedStats = {
   played: number;
@@ -28,48 +22,8 @@ type SharedStats = {
   opponents: Map<number, number>;
 };
 
-type SharePayload = {
-  title?: string;
-  names: string[];
-  matches: MatchPlan[];
-};
-
-type CompactSharePayload = {
-  n: string[];
-  m: [number, number, number, number][][];
-  t?: string;
-};
-
 function addCount(map: Map<number, number>, key: number) {
   map.set(key, (map.get(key) ?? 0) + 1);
-}
-
-function normalizePayload(payload: SharePayload | CompactSharePayload): SharePayload {
-  if ("n" in payload && "m" in payload) {
-    return {
-      title: payload.t,
-      names: payload.n,
-      matches: payload.m.map((game, gameIndex) => {
-        const playing = new Set<number>();
-        const courts = game.map(([a1, a2, b1, b2], courtIndex) => {
-          for (const player of [a1, a2, b1, b2]) playing.add(player);
-          return {
-            court: courtIndex + 1,
-            teamA: [a1, a2] as Team,
-            teamB: [b1, b2] as Team
-          };
-        });
-
-        return {
-          match: gameIndex + 1,
-          courts,
-          resting: payload.n.map((_, index) => index).filter((player) => !playing.has(player))
-        };
-      })
-    };
-  }
-
-  return payload;
 }
 
 function createStats(payload: SharePayload): SharedStats[] {
@@ -157,14 +111,75 @@ function formatSharedSchedule(payload: SharePayload) {
 
 export default function ShortSharePage() {
   const params = useParams<{ id: string }>();
+  return <SharedScheduleViewer key={params.id} shareId={params.id} />;
+}
+
+function SharedScheduleViewer({ shareId }: { shareId: string }) {
+  const mini = useLineMiniApp();
+  const isMini = Boolean(mini);
   const [payload, setPayload] = useState<SharePayload | null>(null);
   const [checkedMatches, setCheckedMatches] = useState<Set<number>>(() => new Set());
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [needsLine, setNeedsLine] = useState(false);
   const [accessAttempt, setAccessAttempt] = useState(0);
+  const [preference, setPreference] = useState<ViewerPreference>({ participant: null, dismissed: false });
+  const [preferenceReady, setPreferenceReady] = useState(false);
+  const initialJumpDone = useRef(false);
+  const controlsRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const measure = () => controls.parentElement?.style.setProperty("--viewer-controls-height", `${controls.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(controls);
+    return () => observer.disconnect();
+  }, [Boolean(payload)]);
+
+  useEffect(() => {
+    try { setPreference(readViewerPreference(window.localStorage, shareId)); } catch { /* Storage may be disabled. */ }
+    setPreferenceReady(true);
+    // Do not override navigation performed while the initial request is pending.
+    const cancelJump = () => { initialJumpDone.current = true; };
+    const onKey = (event: KeyboardEvent) => {
+      if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " ", "Tab"].includes(event.key)) cancelJump();
+    };
+    window.addEventListener("wheel", cancelJump, { passive: true });
+    window.addEventListener("touchstart", cancelJump, { passive: true });
+    window.addEventListener("pointerdown", cancelJump);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("wheel", cancelJump);
+      window.removeEventListener("touchstart", cancelJump);
+      window.removeEventListener("pointerdown", cancelJump);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [shareId]);
+
+  useEffect(() => {
+    if (!payload || !preferenceReady || initialJumpDone.current) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (initialJumpDone.current) return;
+        initialJumpDone.current = true;
+        const id = initialJumpTarget(payload.matches, checkedMatches, window.location.hash);
+        if (id) document.getElementById(id)?.scrollIntoView({ behavior: "instant", block: "start" });
+      });
+    });
+    return () => { window.cancelAnimationFrame(firstFrame); window.cancelAnimationFrame(secondFrame); };
+  }, [payload, checkedMatches, preferenceReady]);
+
+  function updatePreference(next: ViewerPreference) {
+    setPreference(next);
+    try { saveViewerPreference(window.localStorage, shareId, next); } catch { /* Keep the in-memory choice. */ }
+    // MINI app tracking can observe this explicit choice separately from schedule progress.
+  }
+
+  useEffect(() => {
+    const lineContext = isMini ? "?line_context=mini" : "";
     let stopped = false;
     let denied = false;
     let loading = false;
@@ -175,7 +190,7 @@ export default function ShortSharePage() {
       if (stopped || denied || loading) return false;
       loading = true;
       try {
-        const response = await fetch(`/api/share/${encodeURIComponent(params.id)}`, { cache: "no-store" });
+        const response = await fetch(`/api/share/${encodeURIComponent(shareId)}${lineContext}`, { cache: "no-store" });
         if (stopped) return false;
         if (!response.ok) {
           const result = await response.json().catch(() => ({})) as { access?: string };
@@ -194,12 +209,14 @@ export default function ShortSharePage() {
           return false;
         }
         const result = (await response.json()) as {
-          checkedMatches?: number[];
-          payload: SharePayload | CompactSharePayload;
+          checkedMatches?: unknown;
+          payload?: unknown;
         };
         if (stopped || denied) return false;
-        setCheckedMatches(new Set(result.checkedMatches ?? []));
-        setPayload(normalizePayload(result.payload));
+        const normalized = normalizePayload(result?.payload);
+        if (!normalized) throw new Error("Invalid shared schedule");
+        setCheckedMatches(normalizeCheckedMatches(result.checkedMatches, normalized.matches));
+        setPayload(normalized);
         setNeedsLine(false);
         setError("");
         return true;
@@ -213,7 +230,7 @@ export default function ShortSharePage() {
     function connect() {
       if (stopped || denied) return;
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime/${encodeURIComponent(params.id)}`);
+      socket = new WebSocket(`${protocol}//${window.location.host}/api/realtime/${encodeURIComponent(shareId)}${lineContext}`);
       socket.addEventListener("message", () => void refreshPayload());
       socket.addEventListener("close", () => {
         scheduleReconnect();
@@ -246,7 +263,7 @@ export default function ShortSharePage() {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [params.id, accessAttempt]);
+  }, [shareId, accessAttempt, isMini]);
 
   async function handleCopy() {
     if (!payload) return;
@@ -275,10 +292,32 @@ export default function ShortSharePage() {
   const completedMatchCount = payload
     ? payload.matches.filter((match) => checkedMatches.has(match.match)).length
     : 0;
-  const nextMatchNumber = payload?.matches.find((match) => !checkedMatches.has(match.match))?.match ?? null;
+  const nextMatch = payload ? currentMatch(payload.matches, checkedMatches) : null;
+  const nextMatchNumber = nextMatch?.match ?? null;
+  const jumpMatch = nextMatch ?? payload?.matches.at(-1) ?? null;
+  const selectedPlayer = payload ? resolveParticipant(preference.participant, payload.names) : null;
+  const currentPlayerStatus = playerStatus(nextMatch, selectedPlayer);
+
+  function renderName(player: number) {
+    const name = payload?.names[player] || `${player + 1}番`;
+    return player === selectedPlayer ? <mark className={styles.ownName}>{name}</mark> : name;
+  }
+
+  function renderTeam(team: Team) {
+    return <>{renderName(team[0])}・{renderName(team[1])}</>;
+  }
+
+  function jumpToCurrent() {
+    initialJumpDone.current = true;
+    if (!jumpMatch) return;
+    const target = document.getElementById(`match-${jumpMatch.match}`);
+    target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+    target?.focus({ preventScroll: true });
+  }
 
   if (needsLine) {
-    return <main className="page share-page"><LineAccessGate returnTo={`/s/${params.id}`} onAllowed={() => {
+    return <main className="page share-page"><LineAccessGate returnTo={`/s/${shareId}`} onAllowed={() => {
+      initialJumpDone.current = false;
       setNeedsLine(false);
       setAccessAttempt((attempt) => attempt + 1);
     }} /></main>;
@@ -291,6 +330,27 @@ export default function ShortSharePage() {
         <p>共有されたピックルボール練習会の結果です。</p>
       </header>
 
+      {payload ? (
+        <nav ref={controlsRef} className={styles.controls} aria-label="対戦表の表示">
+          <div className={styles.controlRow}>
+            <div className={styles.status} aria-live="polite">
+              <strong>{nextMatch ? `現在：第${nextMatch.match}試合` : payload.matches.length ? "全試合終了" : "試合なし"}</strong>
+              {selectedPlayer !== null ? <> · {renderName(selectedPlayer)}{currentPlayerStatus ? `：${currentPlayerStatus}` : ""}</> : null}
+            </div>
+            {preference.dismissed ? <button className={styles.iconButton} type="button" aria-label="参加者を選ぶ" title="参加者を選ぶ" onClick={() => updatePreference({ ...preference, dismissed: false })}><UserRound size={20} aria-hidden="true" /></button> : null}
+            <button className={styles.iconButton} type="button" disabled={!jumpMatch} onClick={jumpToCurrent} aria-label={nextMatch ? "現在の試合へ移動" : "最後の試合へ移動"} title={nextMatch ? "現在の試合へ移動" : "最後の試合へ移動"} aria-controls={jumpMatch ? `match-${jumpMatch.match}` : undefined}><LocateFixed size={20} aria-hidden="true" /></button>
+          </div>
+          {!preference.dismissed ? <div className={styles.controlRow}>
+            <label className={styles.playerLabel} htmlFor="viewer-participant">自分の名前</label>
+            <select id="viewer-participant" className={styles.select} value={selectedPlayer ?? ""} onChange={(event) => updatePreference({ participant: rememberParticipant(payload.names, event.target.value === "" ? null : Number(event.target.value)), dismissed: false })}>
+              <option value="">選択なし</option>
+              {payload.names.map((name, index) => <option key={index} value={index}>{name || `${index + 1}番`}{payload.names.filter((entry) => entry === name).length > 1 ? ` (${index + 1}番)` : ""}</option>)}
+            </select>
+            <button className={styles.iconButton} type="button" aria-label="名前の選択を閉じる" title="名前の選択を閉じる" onClick={() => updatePreference({ ...preference, dismissed: true })}><X size={20} aria-hidden="true" /></button>
+          </div> : null}
+        </nav>
+      ) : null}
+
       <ShareCommunityPanel scheduleReady={Boolean(payload)} />
 
       {!payload && !error ? <div className="section loading" role="status">乱数表を読み込んでいます...</div> : null}
@@ -298,7 +358,8 @@ export default function ShortSharePage() {
 
       {payload ? (
         <>
-          <section className="section" id="today-match-cards" tabIndex={-1} aria-labelledby="today-match-cards-heading">
+          <RecentVisit shareId={shareId} />
+          <section className={`section ${styles.schedule}`} id="today-match-cards" tabIndex={-1} aria-labelledby="today-match-cards-heading">
             <h2 id="today-match-cards-heading">{payload.title || "生成結果"}</h2>
             <div className="progress-panel" aria-live="polite">
               <div className="progress-copy">
@@ -307,33 +368,34 @@ export default function ShortSharePage() {
                 <span>{nextMatchNumber === null ? "すべての試合が終了しました" : `次は第${nextMatchNumber}試合です`}</span>
               </div>
               <div className="progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={payload.matches.length} aria-valuenow={completedMatchCount}>
-                <span style={{ width: `${(completedMatchCount / payload.matches.length) * 100}%` }} />
+                <span style={{ width: `${payload.matches.length ? (completedMatchCount / payload.matches.length) * 100 : 0}%` }} />
               </div>
             </div>
             {payload.matches.map((match) => (
-              <article className={`match ${checkedMatches.has(match.match) ? "match-done" : ""} ${nextMatchNumber === match.match ? "match-current" : ""}`} key={match.match}>
+              <article id={`match-${match.match}`} tabIndex={-1} aria-current={nextMatchNumber === match.match ? "step" : undefined} className={`match ${styles.match} ${checkedMatches.has(match.match) ? "match-done" : ""} ${nextMatchNumber === match.match ? "match-current" : ""}`} key={match.match}>
                 <h3>
                   第{match.match}試合
                   {checkedMatches.has(match.match) ? <span className="done-badge">終了</span> : null}
                 </h3>
                 {match.courts.map((court) => (
-                  <div className="court" key={`${match.match}-${court.court}`}>
+                  <div className={`court ${selectedPlayer !== null && [...court.teamA, ...court.teamB].includes(selectedPlayer) ? styles.ownCourt : ""}`} key={`${match.match}-${court.court}`}>
                     <div className="court-title">コート{court.court}</div>
                     <div className="versus">
-                      <span className="team-name">{formatTeam(court.teamA, payload.names)}</span>
+                      <span className="team-name">{renderTeam(court.teamA)}</span>
                       <span className="vs-mark">VS</span>
-                      <span className="team-name">{formatTeam(court.teamB, payload.names)}</span>
+                      <span className="team-name">{renderTeam(court.teamB)}</span>
                     </div>
                   </div>
                 ))}
                 <div className="rest">
-                  休み：{match.resting.length ? match.resting.map((player) => payload.names[player]).join("、") : "なし"}
+                  休み：{match.resting.length ? match.resting.map((player, index) => <span key={player}>{index ? "、" : ""}{renderName(player)}</span>) : "なし"}
                 </div>
+                {selectedPlayer !== null ? <p className={styles.playerStatus}>{renderName(selectedPlayer)}：{playerStatus(match, selectedPlayer)}</p> : null}
               </article>
             ))}
           </section>
 
-          <section className="section">
+          <section className={`section ${styles.summary}`} id="schedule-summary">
             <h2>集計</h2>
             <div className="summary-wrap">
               <table className="summary">
@@ -349,7 +411,7 @@ export default function ShortSharePage() {
                 <tbody>
                   {stats.map((stat, index) => (
                     <tr key={index}>
-                      <td data-label="名前">{payload.names[index]}</td>
+                      <td data-label="名前">{renderName(index)}</td>
                       <td data-label="出場">{stat.played}回</td>
                       <td data-label="休み">{stat.rested}回</td>
                       <td data-label="ペア">{mapNames(stat.partners, payload.names)}</td>

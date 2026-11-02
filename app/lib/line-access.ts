@@ -1,5 +1,6 @@
 // LINE access is enforced in worker.ts, before either the data API or WebSocket
 // reaches the app. Client-side display checks alone do not protect a schedule.
+import { InvalidJsonBody, readBoundedJson } from "./request-json.ts";
 export type LineEnvironment = {
   LINE_ACCESS_REQUIRED?: string;
   LINE_CHANNEL_ID?: string;
@@ -7,6 +8,9 @@ export type LineEnvironment = {
   LINE_SESSION_SECRET?: string;
   LINE_CALLBACK_URL?: string;
   LINE_OFFICIAL_ACCOUNT_ID?: string;
+  LINE_MINIAPP_CHANNEL_ID?: string;
+  LINE_MINIAPP_LIFF_ID?: string;
+  LINE_MINIAPP_SHARE_ENABLED?: string;
 };
 
 export type LineAccessState = "allowed" | "login_required" | "friend_required" | "unavailable" | "not_configured";
@@ -14,7 +18,7 @@ export type LineAccess = { state: LineAccessState; cookie?: string };
 type Config = { channel: string; secret: string; encryption: string; callback: string; account: string };
 type Flow = { state: string; verifier: string; returnTo: string; expires: number };
 type ReturnContext = { returnTo: string; expires: number };
-type Session = { accessToken: string; expires: number; friend: boolean; checked: number };
+type Session = { accessToken: string; expires: number; friend: boolean; checked: number; viewerKey?: string };
 
 const DAY = 86400;
 const FRIEND_CACHE_SECONDS = 300;
@@ -41,7 +45,18 @@ function config(env: LineEnvironment): Config | null {
 }
 
 export function safeLineReturnTo(value: string | null) {
-  return value && (/^\/s\/[A-Za-z0-9]{6,20}$/.test(value) || value === "/line-access") ? value : "/line-access";
+  return value && (/^\/s\/[A-Za-z0-9]{6,20}$/.test(value) || value === "/line-access" || value === "/recent" || value === "/resume") ? value : "/line-access";
+}
+
+export function lineMiniConfig(env: LineEnvironment) {
+  return /^\d+$/.test(env.LINE_MINIAPP_CHANNEL_ID ?? "") && /^\d+-[A-Za-z0-9]+$/.test(env.LINE_MINIAPP_LIFF_ID ?? "")
+    ? { channelId: env.LINE_MINIAPP_CHANNEL_ID!, liffId: env.LINE_MINIAPP_LIFF_ID! } : null;
+}
+
+function sessionContext(request: Request, env: LineEnvironment, settings: Config) {
+  if (new URL(request.url).searchParams.get("line_context") !== "mini") return { settings, purpose: "session" };
+  const mini = lineMiniConfig(env);
+  return mini ? { settings: { ...settings, channel: mini.channelId }, purpose: "mini_session" } : null;
 }
 
 function base64(bytes: Uint8Array) {
@@ -59,8 +74,9 @@ async function key(settings: Config) {
   return crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
-// Tokens never enter localStorage, a URL, or readable JavaScript cookies. AES-GCM
-// both hides their contents and rejects modified cookies. AAD prevents swapping
+// The server stores tokens only in encrypted, HttpOnly cookies. LIFF manages its
+// own SDK credentials; app code must not copy them to localStorage or URLs. AES-GCM
+// hides cookie contents and rejects modification. AAD prevents swapping
 // login-flow cookies with sessions, or reusing them for another channel/account.
 async function seal(value: Flow | Session | ReturnContext, purpose: string, settings: Config) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -130,7 +146,10 @@ export async function readLineAccess(request: Request, env: LineEnvironment, for
   if (!lineRequired(env) && !preview) return { state: "allowed" };
   const settings = config(env);
   if (!settings) return { state: "not_configured" };
-  const session = await open<Session>(readCookie(request, "session"), "session", settings);
+  const context = sessionContext(request, env, settings);
+  if (!context) return { state: "not_configured" };
+  const { purpose, settings: sessionSettings } = context;
+  const session = await open<Session>(readCookie(request, purpose), purpose, sessionSettings);
   if (!session || typeof session.accessToken !== "string" || !Number.isFinite(session.expires) || session.expires <= seconds()) {
     return { state: "login_required" };
   }
@@ -139,16 +158,42 @@ export async function readLineAccess(request: Request, env: LineEnvironment, for
   }
   try {
     const friend = await friendship(session.accessToken);
-    if (friend === "expired") return { state: "login_required", cookie: cookie(request, "session", "", 0) };
+    if (friend === "expired") return { state: "login_required", cookie: cookie(request, purpose, "", 0) };
     session.friend = friend;
     session.checked = seconds();
     return {
       state: friend ? "allowed" : "friend_required",
-      cookie: cookie(request, "session", await seal(session, "session", settings), session.expires - seconds())
+      cookie: cookie(request, purpose, await seal(session, purpose, sessionSettings), session.expires - seconds())
     };
   } catch {
     // A timeout, malformed response or provider error must never grant access.
     return { state: "unavailable" };
+  }
+}
+
+// The browser never supplies a user ID. Obtain it from LINE with the already
+// verified token, then HMAC it before using it as a per-viewer database key.
+// Web and mini-app channels must belong to the same LINE provider to share IDs.
+export async function readLineViewer(request: Request, env: LineEnvironment) {
+  const access = await readLineAccess(request, env, false, true);
+  if (access.state !== "allowed") return { access, viewerKey: null };
+  const settings = config(env)!;
+  const context = sessionContext(request, env, settings)!;
+  const refreshed = access.cookie?.split(";")[0].split("=").slice(1).join("=");
+  const session = await open<Session>(refreshed ?? readCookie(request, context.purpose), context.purpose, context.settings);
+  if (!session) return { access: { state: "login_required" } as LineAccess, viewerKey: null };
+  if (session.viewerKey && /^[a-f0-9]{64}$/.test(session.viewerKey)) return { access, viewerKey: session.viewerKey };
+  try {
+    const response = await lineFetch("https://api.line.me/v2/profile", { headers: { Authorization: `Bearer ${session.accessToken}` } });
+    if (!response.ok) throw new Error("Profile unavailable");
+    const profile = await response.json() as { userId?: unknown };
+    if (typeof profile.userId !== "string" || !/^U[a-f0-9]{32}$/.test(profile.userId)) throw new Error("Invalid identity");
+    const hmacKey = await crypto.subtle.importKey("raw", encoder.encode(settings.encryption), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", hmacKey, encoder.encode(`pickleball-viewer:${profile.userId}`));
+    session.viewerKey = Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, "0")).join("");
+    return { access: { state: "allowed", cookie: cookie(request, context.purpose, await seal(session, context.purpose, context.settings), session.expires - seconds()) } as LineAccess, viewerKey: session.viewerKey };
+  } catch {
+    return { access: { state: "unavailable" } as LineAccess, viewerKey: null };
   }
 }
 
@@ -178,6 +223,35 @@ export async function handleLineRequest(request: Request, env: LineEnvironment):
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/line/")) return null;
   const settings = config(env);
+  if (url.pathname === "/api/line/mini/config" && request.method === "GET") {
+    const mini = lineMiniConfig(env);
+    return Response.json({ enabled: Boolean(settings && mini), shareEnabled: Boolean(settings && mini && env.LINE_MINIAPP_SHARE_ENABLED === "true"), liffId: mini?.liffId ?? null, accountId: env.LINE_OFFICIAL_ACCOUNT_ID ?? null }, { headers: PRIVATE_HEADERS });
+  }
+  if (url.pathname === "/api/line/mini/session" && request.method === "POST") {
+    if (request.headers.get("origin") !== url.origin) return new Response(null, { status: 403, headers: PRIVATE_HEADERS });
+    const mini = lineMiniConfig(env);
+    if (!settings || !mini || new URL(settings.callback).origin !== url.origin) return lineAccessResponse({ state: "not_configured" });
+    if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") return new Response(null, { status: 400, headers: PRIVATE_HEADERS });
+    let token: unknown;
+    try {
+      const body = await readBoundedJson(request, 4096);
+      token = body && typeof body === "object" && !Array.isArray(body) ? (body as { accessToken?: unknown }).accessToken : null;
+    } catch (error) { return new Response(null, { status: error instanceof InvalidJsonBody ? error.status : 400, headers: PRIVATE_HEADERS }); }
+    if (typeof token !== "string" || !token || token.length > 2000) return new Response(null, { status: 400, headers: PRIVATE_HEADERS });
+    try {
+      const verifyUrl = new URL("https://api.line.me/oauth2/v2.1/verify");
+      verifyUrl.searchParams.set("access_token", token);
+      const response = await lineFetch(verifyUrl.href);
+      if (!response.ok) return lineAccessResponse({ state: "login_required" });
+      const verified = await response.json() as { client_id?: unknown; expires_in?: unknown; scope?: unknown };
+      if (verified.client_id !== mini.channelId || typeof verified.expires_in !== "number" || !Number.isFinite(verified.expires_in) || verified.expires_in <= 60 || typeof verified.scope !== "string" || !verified.scope.split(" ").includes("profile")) return lineAccessResponse({ state: "login_required" });
+      const friend = await friendship(token);
+      if (friend === "expired") return lineAccessResponse({ state: "login_required" });
+      const session: Session = { accessToken: token, expires: seconds() + Math.min(30 * DAY, verified.expires_in - 60), friend, checked: seconds() };
+      const value = await seal(session, "mini_session", { ...settings, channel: mini.channelId });
+      return lineAccessResponse({ state: friend ? "allowed" : "friend_required", cookie: cookie(request, "mini_session", value, session.expires - seconds()) });
+    } catch { return lineAccessResponse({ state: "unavailable" }); }
+  }
   if (url.pathname === "/api/line/status" && (request.method === "GET" || request.method === "POST")) {
     if (request.method === "POST" && request.headers.get("origin") !== url.origin) return new Response(null, { status: 403, headers: PRIVATE_HEADERS });
     const access = await readLineAccess(request, env, request.method === "POST", url.searchParams.get("preview") === "1");
@@ -187,7 +261,8 @@ export async function handleLineRequest(request: Request, env: LineEnvironment):
   }
   if (url.pathname === "/api/line/logout" && request.method === "POST") {
     if (request.headers.get("origin") !== url.origin) return new Response(null, { status: 403, headers: PRIVATE_HEADERS });
-    return new Response(null, { status: 204, headers: { ...PRIVATE_HEADERS, "Set-Cookie": cookie(request, "session", "", 0) } });
+    const purpose = url.searchParams.get("line_context") === "mini" ? "mini_session" : "session";
+    return new Response(null, { status: 204, headers: { ...PRIVATE_HEADERS, "Set-Cookie": cookie(request, purpose, "", 0) } });
   }
   if (request.method !== "GET") return new Response(null, { status: 405, headers: PRIVATE_HEADERS });
   if (!settings || new URL(settings.callback).origin !== url.origin) return lineAccessResponse({ state: "not_configured" });

@@ -1,0 +1,71 @@
+.controls {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.status {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.playerLabel {
+  color: var(--detail-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.select {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 44px;
+  padding: 6px 24px 6px 8px;
+  border: 1px solid var(--field-line);
+  border-radius: 6px;
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-overflow: ellipsis;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 8px;
+  border: 1px solid var(--field-line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--brand-ink);
+  cursor: pointer;
+}
+
+.iconButton:disabled { opacity: 0.45; cursor: default; }
+.iconButton:focus-visible, .select:focus-visible { outline: 2px solid var(--brand-ink); outline-offset: 2px; }
+.match, .schedule, .summary { scroll-margin-top: calc(var(--viewer-controls-height, 116px) + 16px) !important; }
+.ownCourt { border: 2px solid var(--brand-ink); }
+.ownName { background: var(--notice-bg); color: var(--notice-ink); font-weight: 900; border-radius: 3px; padding: 1px 3px; }
+.playerStatus { color: var(--brand-ink); font-size: 14px; font-weight: 800; margin: 8px 0 0; }
+:global(.match-done) .ownCourt { opacity: 1; }

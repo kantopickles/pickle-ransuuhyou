@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import QRCode from "qrcode";
+import { buildParticipantShareUrl } from "../lib/participant-share-url";
 
 type Team = [number, number];
 
@@ -470,7 +471,7 @@ export default function AdminPage() {
   async function openHistoryShareModal() {
     if (!selected) return;
 
-    const url = `${window.location.origin}/s/${selected.id}`;
+    const url = await buildParticipantShareUrl(window.location.origin, selected.id);
     setShareUrl(url);
     setShareQrCode("");
     setShareCopied(false);

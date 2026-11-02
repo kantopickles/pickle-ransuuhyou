@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { buildParticipantShareUrl } from "./lib/participant-share-url";
 import {
   addCount,
   analyzeScheduleConstraints,
@@ -954,6 +955,7 @@ export default function Home() {
       nextShareUrl = `${window.location.origin}/share#${encoded}`;
     }
 
+    if (nextShareId) nextShareUrl = await buildParticipantShareUrl(window.location.origin, nextShareId);
     try {
       nextQrCode = await QRCode.toDataURL(nextShareUrl, {
         errorCorrectionLevel: "L",

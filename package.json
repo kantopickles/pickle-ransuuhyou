@@ -16,6 +16,7 @@
     "build:next": "next build"
   },
   "dependencies": {
+    "@line/liff": "^2.31.1",
     "@types/qrcode": "^1.5.6",
     "@vinext/cloudflare": "^1.0.0-beta.7",
     "lucide-react": "^1.55.0",

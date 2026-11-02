@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import vinextHandler from "vinext/server/fetch-handler";
 import { isAdminRequest } from "./app/api/admin/_utils";
-import { attachLineCookie, handleLineRequest, isProtectedShareRead, lineAccessResponse, lineRequired, readLineAccess } from "./app/lib/line-access";
+import { attachLineCookie, handleLineRequest, isProtectedShareRead, lineAccessResponse, lineMiniConfig, lineRequired, readLineAccess } from "./app/lib/line-access";
+import { cleanupLineHistory, handleLineRecentRequest } from "./app/lib/line-recent";
 
 const REALTIME_PATH = /^\/api\/realtime\/([A-Za-z0-9]{6,20})$/;
 
@@ -38,6 +39,20 @@ export class ScheduleRoom extends DurableObject<Env> {
 
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext) {
+    // Keep the official-account return link stable across the mini-app rollout.
+    const mini = lineMiniConfig(env);
+    if (request.method === "GET" && new URL(request.url).pathname === "/resume" && mini && env.LINE_MINIAPP_SHARE_ENABLED === "true") {
+      return new Response(null, { status: 302, headers: { Location: `https://miniapp.line.me/${mini.liffId}`, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+    }
+    const recentResponse = await handleLineRecentRequest(request, env);
+    if (recentResponse) {
+      // Free accounts have a shared cron quota. A successful history request
+      // performs indexed retention cleanup without allocating another trigger.
+      if (recentResponse.ok) context.waitUntil(cleanupLineHistory(env.DB).catch(() => {
+        console.warn("LINE_HISTORY_CLEANUP_FAILED");
+      }));
+      return recentResponse;
+    }
     const lineResponse = await handleLineRequest(request, env);
     if (lineResponse) return lineResponse;
     // Legacy links embed the data in the URL hash and cannot be made secret

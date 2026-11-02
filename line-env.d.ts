@@ -5,4 +5,7 @@ interface Env {
   LINE_SESSION_SECRET?: string;
   LINE_CALLBACK_URL?: string;
   LINE_OFFICIAL_ACCOUNT_ID?: string;
+  LINE_MINIAPP_CHANNEL_ID?: string;
+  LINE_MINIAPP_LIFF_ID?: string;
+  LINE_MINIAPP_SHARE_ENABLED?: string;
 }
