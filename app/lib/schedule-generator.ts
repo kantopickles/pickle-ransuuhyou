@@ -509,6 +509,47 @@ function cloneStats(stats: PlayerStats[]) {
   }));
 }
 
+function createAlternatingPairRotation(selections: Unit[][], pair: Team) {
+  const pairMask = (1 << pair[0]) | (1 << pair[1]);
+  const candidates = selections.map(units => {
+    const players = units.flatMap(unit => unit.members);
+    return { units, players, mask: players.reduce((mask, player) => mask | (1 << player), 0) };
+  });
+  const next = (previous: number | null, restStreaks: number[]) => candidates.filter(candidate => {
+    if (restStreaks.some((streak, player) => streak >= 2 && !(candidate.mask & (1 << player)))) return false;
+    if (previous === null) return Boolean(candidate.mask & pairMask);
+    const intersection = candidate.mask & previous;
+    // 8名専用のビット集合です。共通ビットが1個だけなら、連続出場者も1人です。
+    return Boolean(candidate.mask & pairMask) !== Boolean(previous & pairMask)
+      && intersection !== 0 && (intersection & (intersection - 1)) === 0;
+  });
+
+  // 直近の回数だけを揃えると、10試合目などで「全員5回」に戻せない枝へ進むことがあります。
+  // 残り試合もこの交代ルールで最後まで回せるかをメモ化探索し、公平な終点に到達できる候補を残します。
+  // 手動変更済みの履歴などで差1回以内が不可能なら、通常の公平性スコアへ戻します。
+  const memo = new Map<string, boolean>();
+  let visited = 0;
+  const canFinish = (remaining: number, previous: number | null, counts: number[], restStreaks: number[], low: number, high: number): boolean => {
+    if (counts.some(count => count > high || count + remaining < low)) return false;
+    if (!remaining) return true;
+    const key = `${remaining}:${previous}:${counts.join(",")}:${restStreaks.join(",")}`;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
+    // スマホでの処理量を制限します。探索上限に達しても交代ルールは緩めず、
+    // 到達可能性による絞り込みだけをやめて、既存スコアで公平性を比較します。
+    if (++visited > 25_000) return true;
+    const options = next(previous, restStreaks).map(candidate => {
+      const after = counts.map((count, player) => count + Number(candidate.players.includes(player)));
+      const restsAfter = restStreaks.map((streak, player) => candidate.players.includes(player) ? 0 : streak + 1);
+      return { candidate, after, restsAfter, priority: after.reduce((sum, count) => sum + count * count, 0) };
+    }).sort((left, right) => left.priority - right.priority);
+    const possible = options.some(({ candidate, after, restsAfter }) => canFinish(remaining - 1, candidate.mask, after, restsAfter, low, high));
+    memo.set(key, possible);
+    return possible;
+  };
+  return { next, canFinish, get exhausted() { return visited > 25_000; } };
+}
+
 export function generateSchedule(
   participantCount: number,
   requestedCourtCount: number,
@@ -554,14 +595,45 @@ export function generateSchedule(
     throw new Error("現在の参加人数・コート数・固定ペア数では、組み合わせを作成できません。固定ペアを減らすか、コート数を変更してください。");
   }
 
+  // 8人・1面・固定1組は、ペアを交互出場にして、毎試合1人だけコートに残します。
+  // スコアの加点・減点だけではこの回し方を保証できないため、出場候補の必須条件にします。
+  // 明示的な「休みなし」がある場合はそちらを優先し、この特別な交代ルールは適用しません。
+  const alternatingPair = participantCount === 8 && activeCourts === 1 && fixedPairs.length === 1 && !requiredPlayers.size
+    ? fixedPairs[0] : null;
+  const previousRest = initiallyRestedLastMatch;
+  let previousPlaying = alternatingPair && previousRest?.size === 4
+    && [...previousRest].every(player => Number.isInteger(player) && player >= 0 && player < participantCount)
+    && previousRest.has(alternatingPair[0]) === previousRest.has(alternatingPair[1])
+    ? new Set(Array.from({ length: participantCount }, (_, player) => player).filter(player => !previousRest.has(player)))
+    : null;
+  // 人数変更や手動でのペア変更により直前の4人を特定できない場合は、新条件の初戦として扱います。
+  // 古い人数での休みを持ち込むと「3連続休みを防ぐ」と「1人だけ残す」が衝突するためです。
+  if (alternatingPair && previousRest?.size && !previousPlaying) restStreaks = Array(participantCount).fill(0);
+  const rotation = alternatingPair && exactSelections ? createAlternatingPairRotation(exactSelections, alternatingPair) : null;
+  const finalAverage = (stats.reduce((sum, stat) => sum + stat.played, 0) + matchCount * targetPlayers) / participantCount;
+  const low = Math.floor(finalAverage);
+  const high = Math.ceil(finalAverage);
+  const previousMask = () => previousPlaying ? [...previousPlaying].reduce((mask, player) => mask | (1 << player), 0) : null;
+  let balanceRotation = rotation?.canFinish(matchCount, previousMask(), stats.map(stat => stat.played), restStreaks, low, high)
+    && !rotation.exhausted;
+
   for (let matchIndex = 0; matchIndex < matchCount; matchIndex += 1) {
     let bestCourts: CourtPlan[] | null = null;
     let bestScore = Number.POSITIVE_INFINITY;
-    const attemptCount = exactSelections ? Math.max(900, exactSelections.length * 24) : 1_400;
+    let roundSelections = exactSelections;
+    if (rotation) {
+      const options = rotation.next(previousMask(), restStreaks);
+      const balanced = balanceRotation ? options.filter(candidate => rotation.canFinish(matchCount - matchIndex - 1, candidate.mask,
+          stats.map((stat, player) => stat.played + Number(candidate.players.includes(player))),
+          restStreaks.map((streak, player) => candidate.players.includes(player) ? 0 : streak + 1), low, high)) : options;
+      if (rotation.exhausted || !balanced.length) balanceRotation = false;
+      roundSelections = (balanceRotation ? balanced : options).map(candidate => candidate.units);
+    }
+    const attemptCount = roundSelections ? Math.max(900, roundSelections.length * 24) : 1_400;
 
     for (let attempt = 0; attempt < attemptCount; attempt += 1) {
-      const selectedOptionalUnits = exactSelections
-        ? exactSelections[attempt % exactSelections.length]
+      const selectedOptionalUnits = roundSelections
+        ? roundSelections[attempt % roundSelections.length]
         : chooseCandidateUnits(optional, remainingPlayers, stats, restStreaks, random, optionalPairCounts);
       if (!selectedOptionalUnits) continue;
 
@@ -584,6 +656,7 @@ export function generateSchedule(
     }
 
     const resting = applyMatchStats(bestCourts, stats, participantCount);
+    if (alternatingPair) previousPlaying = new Set(bestCourts.flatMap(court => [...court.teamA, ...court.teamB]));
     const restingSet = new Set(resting);
     restStreaks = restStreaks.map((streak, player) => (restingSet.has(player) ? streak + 1 : 0));
     matches.push({ match: matchIndex + 1, courts: bestCourts, resting });

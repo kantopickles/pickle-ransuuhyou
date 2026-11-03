@@ -54,11 +54,22 @@ test("8人・1コート・固定1組でも休みと通常ペアが偏りすぎ�
 
     for (const match of schedule.matches) {
       const fixedPlaying = !match.resting.includes(0);
+      assert.equal(fixedPlaying, match.match % 2 === 1, `seed ${seed}: 固定ペアが交互に出場していない`);
       assert.equal(fixedPlaying, !match.resting.includes(1), `seed ${seed}: 固定ペアが別々に出場`);
       if (fixedPlaying) {
         const teams = match.courts.flatMap((court) => [court.teamA, court.teamB]);
         assert.ok(teams.some((team) => team.includes(0) && team.includes(1)), `seed ${seed}: 固定ペアが分断`);
       }
+    }
+
+    for (let index = 1; index < schedule.matches.length; index += 1) {
+      const before = schedule.matches[index - 1];
+      const current = schedule.matches[index];
+      const playing = current.courts.flatMap(court => [...court.teamA, ...court.teamB]);
+      const continuing = playing.filter(player => !before.resting.includes(player));
+      assert.equal(continuing.length, 1, `seed ${seed}: 連続出場は1人だけにする`);
+      assert.ok(continuing[0] >= 2, "固定ペア以外の人が残る");
+      assert.equal(current.resting.filter(player => before.resting.includes(player)).length, 1);
     }
 
     let largestNormalPairCount = 0;
@@ -69,6 +80,65 @@ test("8人・1コート・固定1組でも休みと通常ペアが偏りすぎ�
       }
     }
     assert.ok(largestNormalPairCount <= 4, `seed ${seed}: 通常ペアが${largestNormalPairCount}回重複`);
+  }
+});
+
+test("8人・1面・固定1組の交互出場は、誰をペアにしても5〜20試合で守る", () => {
+  for (const [a, b] of [[6, 2], [7, 0], [4, 5]]) {
+    for (const count of [5, 10, 15, 20]) {
+      for (let seed = 1; seed <= 10; seed += 1) {
+        const schedule = generateSchedule(8, 1, count, [{ id: "fixed", a, b }], undefined, undefined, seededRandom(seed));
+        assert.equal(schedule.stats[a].played, Math.ceil(count / 2));
+        assert.equal(schedule.stats[b].played, Math.ceil(count / 2));
+        for (let index = 0; index < count; index += 1) {
+          const match = schedule.matches[index];
+          const playing = match.courts.flatMap(court => [...court.teamA, ...court.teamB]);
+          assert.equal(playing.includes(a), index % 2 === 0);
+          assert.equal(playing.includes(b), index % 2 === 0);
+          if (index > 0) {
+            assert.equal(playing.filter(player => !schedule.matches[index - 1].resting.includes(player)).length, 1);
+          }
+        }
+        for (let player = 0; player < 8; player += 1) assert.ok(longestRestStreak(schedule, player) <= 2);
+        const counts = schedule.stats.map(stat => stat.played);
+        assert.ok(Math.max(...counts) - Math.min(...counts) <= 1, `${a}/${b}, ${count}試合, seed ${seed}: ${counts}`);
+      }
+    }
+  }
+});
+
+test("8人・固定1組の続きは終了済み試合から1人だけ残し、固定ペアの出休を引き継ぐ", () => {
+  const pairs: PairSetting[] = [{ id: "fixed", a: 3, b: 7 }];
+  for (const firstCount of [5, 10]) {
+    const first = generateSchedule(8, 1, firstCount, pairs, undefined, undefined, seededRandom(firstCount));
+    const before = first.matches.at(-1)!;
+    const originalStats = first.stats.map(stat => ({ ...stat, partners: new Map(stat.partners), opponents: new Map(stat.opponents) }));
+    const next = generateSchedule(8, 1, 20 - firstCount, pairs, first.stats, new Set(before.resting), seededRandom(50));
+    const matches = [before, ...next.matches];
+    for (let index = 1; index < matches.length; index += 1) {
+      const current = matches[index];
+      const previous = matches[index - 1];
+      const playing = current.courts.flatMap(court => [...court.teamA, ...court.teamB]);
+      assert.equal(playing.includes(3), previous.resting.includes(3));
+      assert.equal(playing.includes(7), previous.resting.includes(7));
+      assert.equal(playing.filter(player => !previous.resting.includes(player)).length, 1);
+    }
+    assert.deepEqual(first.stats, originalStats, "終了済みの集計は変更しない");
+    assert.equal(next.stats[3].played, 10);
+    assert.equal(next.stats[7].played, 10);
+  }
+});
+
+test("人数・固定ペア変更で直前の4人を特定できない場合も、新条件で交代を開始できる", () => {
+  for (const rest of [[2, 3, 4, 5, 6, 7], [0, 2, 3, 4], [-1, 3, 4, 5]]) {
+    const schedule = generateSchedule(8, 1, 5, [{ id: "fixed", a: 0, b: 1 }], undefined, new Set(rest), seededRandom(6));
+    assert.equal(schedule.matches.length, 5);
+    assert.ok(!schedule.matches[0].resting.includes(0));
+    for (let index = 1; index < schedule.matches.length; index += 1) {
+      const current = schedule.matches[index];
+      const playing = current.courts.flatMap(court => [...court.teamA, ...court.teamB]);
+      assert.equal(playing.filter(player => !schedule.matches[index - 1].resting.includes(player)).length, 1);
+    }
   }
 });
 
@@ -165,6 +235,7 @@ test("休みなしの個人・固定ペアは全試合出場し、残りの参�
   const cases = [
     { count: 8, courts: 1, pairs: [], selected: [0], required: [0] },
     { count: 8, courts: 1, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [0], required: [0, 1] },
+    { count: 8, courts: 1, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [2], required: [2] },
     { count: 10, courts: 2, pairs: [], selected: [0, 1], required: [0, 1] },
     { count: 20, courts: 2, pairs: [{ id: "pair", a: 0, b: 1 }], selected: [0, 2], required: [0, 1, 2] }
   ] satisfies { count: number; courts: number; pairs: PairSetting[]; selected: number[]; required: number[] }[];
