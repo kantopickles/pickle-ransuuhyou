@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { buildParticipantShareUrl } from "./lib/participant-share-url";
+import { MAX_PARTICIPANTS, PARTICIPANT_OPTIONS } from "./lib/participant-limits";
 import {
   addCount,
   analyzeScheduleConstraints,
@@ -55,7 +56,6 @@ type ContinuationContext = {
   shareId: string;
 };
 
-const PARTICIPANT_OPTIONS = Array.from({ length: 17 }, (_, index) => index + 4);
 const COURT_OPTIONS = [1, 2, 3, 4, 5];
 const MATCH_OPTIONS = [5, 10, 15, 20];
 const STORAGE_KEY = "pickleball-randomizer-state-v1";
@@ -315,7 +315,7 @@ export default function Home() {
           : [];
 
         if (importedNames.length) {
-          const visibleNames = importedNames.slice(0, 20);
+          const visibleNames = importedNames.slice(0, MAX_PARTICIPANTS);
           const importedCount = Math.max(4, visibleNames.length);
           setParticipantCount(importedCount);
           setTitle(typeof parsed.title === "string" ? parsed.title.trim() : "");
@@ -333,8 +333,8 @@ export default function Home() {
           setSettingsOpen(true);
           setNamesOpen(true);
           setPairsOpen(false);
-          setImportNotice(importedNames.length > 20
-            ? "受付票から先頭20名を取り込みました。乱数表は最大20名までです。"
+          setImportNotice(importedNames.length > MAX_PARTICIPANTS
+            ? `受付票から先頭${MAX_PARTICIPANTS}名を取り込みました。乱数表は最大${MAX_PARTICIPANTS}名までです。`
             : `受付票から${importedNames.length}名を取り込みました。`);
           setStorageLoaded(true);
           window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
@@ -576,8 +576,8 @@ export default function Home() {
   }
 
   function addContinuationParticipant() {
-    if (participantCount >= 20) {
-      setError("参加人数は最大20人です。");
+    if (participantCount >= MAX_PARTICIPANTS) {
+      setError(`参加人数は最大${MAX_PARTICIPANTS}人です。`);
       return;
     }
     markScheduleDirty();
@@ -1341,7 +1341,7 @@ export default function Home() {
               </div>
             ))}
             {continuation ? (
-              <button className="secondary continuation-add-player" type="button" onClick={addContinuationParticipant} disabled={participantCount >= 20}>
+              <button className="secondary continuation-add-player" type="button" onClick={addContinuationParticipant} disabled={participantCount >= MAX_PARTICIPANTS}>
                 参加者を追加
               </button>
             ) : null}

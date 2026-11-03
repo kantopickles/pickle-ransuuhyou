@@ -111,9 +111,9 @@ function assertScheduleIntegrity(
   }
 }
 
-test("4〜20人・1〜5コート・固定ペア0〜複数組で必ず正しい表を作る", () => {
+test("4〜30人・1〜5コート・固定ペア0〜複数組で必ず正しい表を作る", () => {
   let seed = 100;
-  for (let participantCount = 4; participantCount <= 20; participantCount += 1) {
+  for (let participantCount = 4; participantCount <= 30; participantCount += 1) {
     for (let courtCount = 1; courtCount <= 5; courtCount += 1) {
       const pairPatterns: PairSetting[][] = [
         [],
