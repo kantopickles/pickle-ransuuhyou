@@ -6,6 +6,7 @@ import { LocateFixed, UserRound, X } from "lucide-react";
 import ScheduleImageButton from "../../components/ScheduleImageButton";
 import ShareCommunityPanel from "../../components/ShareCommunityPanel";
 import LineAccessGate from "../../components/LineAccessGate";
+import LineServiceGate from "../../components/LineServiceGate";
 import { useLineMiniApp } from "../../components/LineMiniAppProvider";
 import RecentVisit from "../../components/RecentVisit";
 import {
@@ -111,7 +112,7 @@ function formatSharedSchedule(payload: SharePayload) {
 
 export default function ShortSharePage() {
   const params = useParams<{ id: string }>();
-  return <SharedScheduleViewer key={params.id} shareId={params.id} />;
+  return <LineServiceGate key={params.id} shareId={params.id}><SharedScheduleViewer shareId={params.id} /></LineServiceGate>;
 }
 
 function SharedScheduleViewer({ shareId }: { shareId: string }) {

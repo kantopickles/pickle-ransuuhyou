@@ -11,6 +11,10 @@ export type LineEnvironment = {
   LINE_MINIAPP_CHANNEL_ID?: string;
   LINE_MINIAPP_LIFF_ID?: string;
   LINE_MINIAPP_SHARE_ENABLED?: string;
+  LINE_SERVICE_MESSAGES_REQUIRED?: string;
+  LINE_MINIAPP_CHANNEL_SECRET?: string;
+  LINE_SERVICE_TEMPLATE_NAME?: string;
+  LINE_SERVICE_TEMPLATE_PARAMS?: string;
 };
 
 export type LineAccessState = "allowed" | "login_required" | "friend_required" | "unavailable" | "not_configured";
@@ -18,6 +22,7 @@ export type LineAccess = { state: LineAccessState; cookie?: string };
 type Config = { channel: string; secret: string; encryption: string; callback: string; account: string };
 type Flow = { state: string; verifier: string; returnTo: string; expires: number };
 type ReturnContext = { returnTo: string; expires: number };
+type ServiceSecret = { token: string };
 type Session = { accessToken: string; expires: number; friend: boolean; checked: number; viewerKey?: string };
 
 const DAY = 86400;
@@ -78,7 +83,7 @@ async function key(settings: Config) {
 // own SDK credentials; app code must not copy them to localStorage or URLs. AES-GCM
 // hides cookie contents and rejects modification. AAD prevents swapping
 // login-flow cookies with sessions, or reusing them for another channel/account.
-async function seal(value: Flow | Session | ReturnContext, purpose: string, settings: Config) {
+async function seal(value: Flow | Session | ReturnContext | ServiceSecret, purpose: string, settings: Config) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aad = encoder.encode(`${purpose}:${settings.channel}:${settings.account}:${settings.callback}`);
   const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, await key(settings), encoder.encode(JSON.stringify(value)));
@@ -174,8 +179,8 @@ export async function readLineAccess(request: Request, env: LineEnvironment, for
 // The browser never supplies a user ID. Obtain it from LINE with the already
 // verified token, then HMAC it before using it as a per-viewer database key.
 // Web and mini-app channels must belong to the same LINE provider to share IDs.
-export async function readLineViewer(request: Request, env: LineEnvironment) {
-  const access = await readLineAccess(request, env, false, true);
+export async function readLineViewer(request: Request, env: LineEnvironment, force = false) {
+  const access = await readLineAccess(request, env, force, true);
   if (access.state !== "allowed") return { access, viewerKey: null };
   const settings = config(env)!;
   const context = sessionContext(request, env, settings)!;
@@ -195,6 +200,36 @@ export async function readLineViewer(request: Request, env: LineEnvironment) {
   } catch {
     return { access: { state: "unavailable" } as LineAccess, viewerKey: null };
   }
+}
+
+// Server-only credentials for a verified mini session. Never return this object
+// from an HTTP handler or log it; recipients and tokens are not browser inputs.
+export async function readLineMiniCredentials(request: Request, env: LineEnvironment, force = false) {
+  if (new URL(request.url).searchParams.get("line_context") !== "mini") return null;
+  const viewer = await readLineViewer(request, env, force);
+  if (viewer.access.state !== "allowed" || !viewer.viewerKey) return { ...viewer, session: null };
+  const settings = config(env);
+  if (!settings) return null;
+  const context = sessionContext(request, env, settings);
+  if (!context) return null;
+  const refreshed = viewer.access.cookie?.split(";")[0].split("=").slice(1).join("=");
+  const session = await open<Session>(refreshed ?? readCookie(request, context.purpose), context.purpose, context.settings);
+  return { ...viewer, session };
+}
+
+export async function sealLineServiceToken(token: string, env: LineEnvironment) {
+  const settings = config(env);
+  const mini = lineMiniConfig(env);
+  if (!settings || !mini) throw new Error("LINE configuration unavailable");
+  return seal({ token }, "service_token", { ...settings, channel: mini.channelId });
+}
+
+export async function openLineServiceToken(value: string, env: LineEnvironment) {
+  const settings = config(env);
+  const mini = lineMiniConfig(env);
+  if (!settings || !mini) return null;
+  const data = await open<ServiceSecret>(value, "service_token", { ...settings, channel: mini.channelId });
+  return typeof data?.token === "string" ? data.token : null;
 }
 
 export function lineAccessResponse(access: LineAccess) {

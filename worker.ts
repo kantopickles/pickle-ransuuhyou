@@ -3,12 +3,19 @@ import vinextHandler from "vinext/server/fetch-handler";
 import { isAdminRequest } from "./app/api/admin/_utils";
 import { attachLineCookie, handleLineRequest, isProtectedShareRead, lineAccessResponse, lineMiniConfig, lineRequired, readLineAccess } from "./app/lib/line-access";
 import { cleanupLineHistory, handleLineRecentRequest } from "./app/lib/line-recent";
+import { guardLineServiceRead, handleLineServiceRequest } from "./app/lib/line-service";
+import { cleanupServiceStore, handleServiceRoom, serviceRequired } from "./app/lib/line-service-delivery";
 
 const REALTIME_PATH = /^\/api\/realtime\/([A-Za-z0-9]{6,20})$/;
 
 export class ScheduleRoom extends DurableObject<Env> {
   async fetch(request: Request) {
     const url = new URL(request.url);
+
+    if (url.origin === "https://line-service.internal") {
+      return this.ctx.blockConcurrencyWhile(async () =>
+        await handleServiceRoom(request, this.ctx.storage, this.env) ?? new Response(null, { status: 404 }));
+    }
 
     if (url.pathname.endsWith("/notify") && request.method === "POST") {
       const message = await request.text();
@@ -35,6 +42,10 @@ export class ScheduleRoom extends DurableObject<Env> {
   webSocketMessage(socket: WebSocket, message: string | ArrayBuffer) {
     if (message === "ping") socket.send("pong");
   }
+
+  async alarm() {
+    await cleanupServiceStore(this.ctx.storage);
+  }
 }
 
 export default {
@@ -53,6 +64,8 @@ export default {
       }));
       return recentResponse;
     }
+    const serviceResponse = await handleLineServiceRequest(request, env);
+    if (serviceResponse) return serviceResponse;
     const lineResponse = await handleLineRequest(request, env);
     if (lineResponse) return lineResponse;
     // Legacy links embed the data in the URL hash and cannot be made secret
@@ -62,14 +75,19 @@ export default {
     }
 
     // Keep owner/admin editing independent of participant LINE authentication.
-    const access = isProtectedShareRead(request) && lineRequired(env) && !await isAdminRequest(request)
+    const participantRead = isProtectedShareRead(request) && !await isAdminRequest(request);
+    const access = participantRead && lineRequired(env)
       ? await readLineAccess(request, env)
       : { state: "allowed" as const };
     if (access.state !== "allowed") return lineAccessResponse(access);
+    if (participantRead) {
+      const noticeResponse = await guardLineServiceRead(request, env);
+      if (noticeResponse) return noticeResponse;
+    }
 
     const realtimeMatch = new URL(request.url).pathname.match(REALTIME_PATH);
     if (realtimeMatch) {
-      if (lineRequired(env) && request.headers.get("Origin") !== new URL(request.url).origin) {
+      if ((lineRequired(env) || serviceRequired(env)) && request.headers.get("Origin") !== new URL(request.url).origin) {
         return new Response(null, { status: 403 });
       }
       const room = env.SCHEDULE_ROOMS.getByName(realtimeMatch[1]);
