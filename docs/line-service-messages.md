@@ -1,11 +1,17 @@
 # LINE service-message prerequisite
 
-## Status (2026-11-05)
+## Initial Status (2026-11-05)
 
 Implementation is staged, not active for participants. The LINE Console still
 shows the mini app as unverified and the production service-message feature as
 unavailable. No message template was registered or submitted, no real service
 message was sent, and no channel secret was read, rotated or copied.
+
+Setup follow-up: the operator has since completed business/contact information;
+English metadata and isolated development/review endpoints are configured. Matching
+non-production credentials are now in Cloudflare secrets. Production is unchanged,
+the application has not been submitted, and notifications remain disabled. See
+[`line-staging.md`](line-staging.md) for the current setup and remaining device tests.
 
 `LINE_SERVICE_MESSAGES_REQUIRED=false` keeps existing public shares usable.
 Do not enable it until the mini app AND the exact service-message usage/template
@@ -58,13 +64,16 @@ was lost after successful delivery. The screen warns about this. If LINE's token
 quota is exhausted, close/reopen LINE rather than minting extra notification tokens
 for the same access token. No notification/channel credentials are returned or logged.
 
-## Remaining Console Work
+## Initial Console Findings
 
 The review screen reports missing multilingual channel details, development and
 review endpoint URLs, business information (15 items), and contact information
 (7 items). The operator must supply the accurate business entity and private
 contact/verification details directly in LINE. Do not infer legal identity from
 another app or account, accept agreements for the operator, or invent documents.
+
+These missing fields were subsequently completed directly by the operator;
+the current remaining work is documented in `line-staging.md`.
 
 The current template catalog includes order/reservation/entry/ticket categories.
 No reviewed template for this exact view-and-return request has been selected.

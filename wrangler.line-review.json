@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pickleball-randomizer-review",
+  "main": "dist/server/index.js",
+  "no_bundle": true,
+  "rules": [{ "type": "ESModule", "globs": ["**/*.js", "**/*.mjs"] }],
+  "compatibility_date": "2026-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "LINE_ACCESS_REQUIRED": "true",
+    "LINE_CHANNEL_ID": "2012345211",
+    "LINE_OFFICIAL_ACCOUNT_ID": "@892ixgpm",
+    "LINE_CALLBACK_URL": "https://pickleball-randomizer-review.kanto-pickles-draw.workers.dev/api/line/callback",
+    "LINE_MINIAPP_CHANNEL_ID": "2012345211",
+    "LINE_MINIAPP_LIFF_ID": "2012345211-qarTg5SE",
+    "LINE_MINIAPP_SHARE_ENABLED": "true",
+    "LINE_SERVICE_MESSAGES_REQUIRED": "false"
+  },
+  "assets": { "directory": "dist/client", "not_found_handling": "none", "binding": "ASSETS" },
+  "cache": { "enabled": true },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "pickleball-line-staging",
+    "database_id": "13b82842-beb7-46cd-9374-59ccfcadab83",
+    "migrations_dir": "migrations"
+  }],
+  "durable_objects": { "bindings": [{ "name": "SCHEDULE_ROOMS", "class_name": "ScheduleRoom" }] },
+  "exports": { "ScheduleRoom": { "type": "durable-object", "storage": "sqlite" } }
+}
